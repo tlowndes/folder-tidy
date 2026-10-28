@@ -8,62 +8,148 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <nav class="sidebar">
-    <div class="brand">Folder Tidy</div>
-    <button data-page="home" class="nav-btn active">Home</button>
-    <button data-page="rules" class="nav-btn">Rules</button>
-    <button data-page="history" class="nav-btn">History</button>
-    <button data-page="settings" class="nav-btn">Settings</button>
-  </nav>
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+      </div>
+      <div>
+        <div class="brand-name">Folder Tidy</div>
+        <div class="brand-sub">Keep things in order</div>
+      </div>
+    </div>
 
-  <main>
+    <nav class="nav">
+      <button data-page="home" class="nav-btn active"><span data-icon="home"></span>Home</button>
+      <button data-page="rules" class="nav-btn"><span data-icon="rules"></span>Rules</button>
+      <button data-page="history" class="nav-btn"><span data-icon="history"></span>History</button>
+      <button data-page="settings" class="nav-btn"><span data-icon="settings"></span>Settings</button>
+    </nav>
+
+    <div class="status-pill" id="status-pill">
+      <span class="dot" id="status-dot"></span>
+      <span id="status-label">Watching</span>
+    </div>
+  </aside>
+
+  <main class="content">
+    <!-- HOME -->
     <section id="home" class="page active">
-      <h1>Home</h1>
+      <header class="page-head">
+        <div>
+          <h1>Home</h1>
+          <p class="sub">Your downloads and documents are sorted automatically.</p>
+        </div>
+      </header>
+
+      <div class="hero card">
+        <div class="hero-text">
+          <div class="hero-kicker" id="hero-kicker">Active</div>
+          <div class="hero-title" id="hero-title">Watching 2 folders</div>
+          <div class="hero-meta" id="hero-meta"></div>
+        </div>
+        <button id="pause-btn" class="btn btn-light">Pause</button>
+      </div>
+
+      <div class="stats">
+        <div class="card stat"><div class="stat-num" id="stat-today">0</div><div class="stat-label">Moved today</div></div>
+        <div class="card stat"><div class="stat-num" id="stat-week">0</div><div class="stat-label">Moved this week</div></div>
+        <div class="card stat"><div class="stat-num" id="stat-rules">0</div><div class="stat-label">Active rules</div></div>
+      </div>
+
       <div class="card">
-        <p id="status-text">Watching</p>
-        <button id="pause-btn" class="secondary">Pause</button>
+        <div class="card-head">
+          <h2>Recent moves</h2>
+          <button class="link-btn" data-goto="history">View all</button>
+        </div>
+        <ul id="recent-list" class="rows"></ul>
       </div>
-      <h2>Recent moves</h2>
-      <ul id="recent-list" class="list"></ul>
     </section>
 
+    <!-- RULES -->
     <section id="rules" class="page">
-      <h1>Rules</h1>
-      <p class="hint">Rules are checked top to bottom. The first match wins. A rule with no destination does nothing.</p>
-      <div id="rules-list"></div>
-      <div class="row">
-        <button id="add-rule" class="secondary">Add rule</button>
-        <button id="save-rules">Save rules</button>
+      <header class="page-head">
+        <div>
+          <h1>Rules</h1>
+          <p class="sub">Checked top to bottom. The first rule that matches a file wins.</p>
+        </div>
+        <button id="add-rule" class="btn btn-outline">+ Add rule</button>
+      </header>
+
+      <div id="rules-list" class="stack"></div>
+
+      <div class="card test-card">
+        <div class="card-head"><h2>Try a file name</h2></div>
+        <div class="test-row">
+          <input id="test-name" type="text" class="input" placeholder="e.g. invoice-may.pdf">
+          <div id="test-result" class="test-result"></div>
+        </div>
       </div>
-      <h2>Test a file name</h2>
-      <div class="row">
-        <input id="test-name" type="text" placeholder="invoice-may.pdf">
-        <span id="test-result" class="hint"></span>
-      </div>
+
+      <footer class="page-foot">
+        <button id="save-rules" class="btn btn-primary">Save rules</button>
+      </footer>
     </section>
 
+    <!-- HISTORY -->
     <section id="history" class="page">
-      <h1>History</h1>
-      <p class="hint">Entries are kept for 30 days. Undo moves a file back to where it was.</p>
-      <table>
-        <thead><tr><th>Time</th><th>File</th><th>From</th><th>To</th><th></th></tr></thead>
-        <tbody id="history-body"></tbody>
-      </table>
+      <header class="page-head">
+        <div>
+          <h1>History</h1>
+          <p class="sub">Moves are kept for 30 days. Undo returns a file to where it was.</p>
+        </div>
+      </header>
+      <div class="card table-card">
+        <table>
+          <thead><tr><th>When</th><th>File</th><th>Moved to</th><th></th></tr></thead>
+          <tbody id="history-body"></tbody>
+        </table>
+      </div>
     </section>
 
+    <!-- SETTINGS -->
     <section id="settings" class="page">
-      <h1>Settings</h1>
-      <label class="field"><input id="s-login" type="checkbox"> Start with Windows</label>
-      <label class="field"><input id="s-dry" type="checkbox"> Dry run (show moves, don't make them)</label>
-      <label class="field">Delay before moving: <span id="s-delay-label"></span>
-        <input id="s-delay" type="range" min="0" max="900" step="30"></label>
-      <h2>Watched folders</h2>
-      <div id="sources-list"></div>
-      <div class="row">
-        <input id="new-source" type="text" placeholder="C:\Users\you\Pictures">
-        <button id="add-source" class="secondary">Add folder</button>
-        <button id="save-settings">Save settings</button>
+      <header class="page-head">
+        <div>
+          <h1>Settings</h1>
+          <p class="sub">How and when Folder Tidy works.</p>
+        </div>
+      </header>
+
+      <div class="card">
+        <div class="card-head"><h2>General</h2></div>
+        <label class="setting">
+          <span><strong>Start with Windows</strong><small>Runs quietly in the tray when you sign in.</small></span>
+          <input id="s-login" type="checkbox" class="switch">
+        </label>
+        <label class="setting">
+          <span><strong>Dry run</strong><small>Shows what would move, without moving anything.</small></span>
+          <input id="s-dry" type="checkbox" class="switch">
+        </label>
       </div>
+
+      <div class="card">
+        <div class="card-head"><h2>Timing</h2></div>
+        <div class="setting column">
+          <span><strong>Wait before moving</strong><small>Gives you time to open a file after it downloads.</small></span>
+          <div class="slider-row">
+            <input id="s-delay" type="range" min="0" max="900" step="30">
+            <span id="s-delay-label" class="slider-value"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>Watched folders</h2></div>
+        <ul id="sources-list" class="rows"></ul>
+        <div class="card-foot">
+          <button id="add-source" class="btn btn-outline">+ Add folder</button>
+        </div>
+      </div>
+
+      <footer class="page-foot">
+        <button id="save-settings" class="btn btn-primary">Save settings</button>
+      </footer>
     </section>
   </main>
 

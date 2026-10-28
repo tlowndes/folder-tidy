@@ -11,5 +11,6 @@ contextBridge.exposeInMainWorld('folderTidy', {
   saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
   undo: (id) => ipcRenderer.invoke('undo', id),
   openFolder: (folder) => ipcRenderer.invoke('open-folder', folder),
+  pickFolder: (title) => ipcRenderer.invoke('pick-folder', title),
   onStateChanged: (callback) => ipcRenderer.on('state-changed', () => callback()),
 });

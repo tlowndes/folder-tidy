@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, Tray, Menu, ipcMain, Notification, nativeImage, shell } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, Notification, nativeImage, shell, dialog } = require('electron');
 const path = require('path');
 const os = require('os');
 const { Config } = require('./lib/config');
@@ -143,6 +143,13 @@ ipcMain.handle('save-settings', (_e, settings) => {
 });
 ipcMain.handle('undo', (_e, id) => undoById(id));
 ipcMain.handle('open-folder', (_e, folder) => shell.openPath(folder));
+ipcMain.handle('pick-folder', async (_e, title) => {
+  const result = await dialog.showOpenDialog(win, {
+    title: title || 'Choose a folder',
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  return result.canceled ? null : result.filePaths[0];
+});
 
 app.whenReady().then(() => {
   createWindow();
