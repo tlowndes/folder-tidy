@@ -81,6 +81,12 @@ test('isProtectedPath: "@" and "." folders and system locations are protected', 
   assert.equal(isProtectedPath('C:\\Users\\tom\\Documents\\Invoices\\x.pdf'), false);
 });
 
+test('isProtectedPath: Windows junctions inside Documents (My Music etc.) are protected', () => {
+  assert.equal(isProtectedPath('C:\\Users\\tom\\Documents\\My Music'), true);
+  assert.equal(isProtectedPath('C:\\Users\\tom\\Documents\\my pictures\\x.jpg'), true);
+  assert.equal(isProtectedPath('C:\\Users\\tom\\Documents\\My Videos'), true);
+});
+
 test('isPartialDownload: browser partial files are skipped', () => {
   assert.equal(isPartialDownload('file.crdownload'), true);
   assert.equal(isPartialDownload('file.part'), true);
