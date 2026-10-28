@@ -1,0 +1,38 @@
+{
+  "name": "folder-tidy",
+  "productName": "Folder Tidy",
+  "version": "0.1.0",
+  "description": "Watches Downloads and Documents and moves files to the right place, with undo",
+  "main": "main.js",
+  "author": "Tom Lowndes",
+  "license": "MIT",
+  "private": false,
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.js",
+    "dist": "electron-builder --win"
+  },
+  "dependencies": {
+    "chokidar": "^4.0.3"
+  },
+  "devDependencies": {
+    "electron": "^44.7.2",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "uk.co.tomlowndes.foldertidy",
+    "productName": "Folder Tidy",
+    "files": [
+      "main.js",
+      "preload.js",
+      "lib/**",
+      "src/**"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    }
+  }
+}

@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Folder Tidy</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <nav class="sidebar">
+    <div class="brand">Folder Tidy</div>
+    <button data-page="home" class="nav-btn active">Home</button>
+    <button data-page="rules" class="nav-btn">Rules</button>
+    <button data-page="history" class="nav-btn">History</button>
+    <button data-page="settings" class="nav-btn">Settings</button>
+  </nav>
+
+  <main>
+    <section id="home" class="page active">
+      <h1>Home</h1>
+      <div class="card">
+        <p id="status-text">Watching</p>
+        <button id="pause-btn" class="secondary">Pause</button>
+      </div>
+      <h2>Recent moves</h2>
+      <ul id="recent-list" class="list"></ul>
+    </section>
+
+    <section id="rules" class="page">
+      <h1>Rules</h1>
+      <p class="hint">Rules are checked top to bottom. The first match wins. A rule with no destination does nothing.</p>
+      <div id="rules-list"></div>
+      <div class="row">
+        <button id="add-rule" class="secondary">Add rule</button>
+        <button id="save-rules">Save rules</button>
+      </div>
+      <h2>Test a file name</h2>
+      <div class="row">
+        <input id="test-name" type="text" placeholder="invoice-may.pdf">
+        <span id="test-result" class="hint"></span>
+      </div>
+    </section>
+
+    <section id="history" class="page">
+      <h1>History</h1>
+      <p class="hint">Entries are kept for 30 days. Undo moves a file back to where it was.</p>
+      <table>
+        <thead><tr><th>Time</th><th>File</th><th>From</th><th>To</th><th></th></tr></thead>
+        <tbody id="history-body"></tbody>
+      </table>
+    </section>
+
+    <section id="settings" class="page">
+      <h1>Settings</h1>
+      <label class="field"><input id="s-login" type="checkbox"> Start with Windows</label>
+      <label class="field"><input id="s-dry" type="checkbox"> Dry run (show moves, don't make them)</label>
+      <label class="field">Delay before moving: <span id="s-delay-label"></span>
+        <input id="s-delay" type="range" min="0" max="900" step="30"></label>
+      <h2>Watched folders</h2>
+      <div id="sources-list"></div>
+      <div class="row">
+        <input id="new-source" type="text" placeholder="C:\Users\you\Pictures">
+        <button id="add-source" class="secondary">Add folder</button>
+        <button id="save-settings">Save settings</button>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
