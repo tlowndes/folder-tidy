@@ -27,6 +27,17 @@ npm start     # run the app
 npm run dist  # build the Windows installer and portable exe
 ```
 
+## Release
+
+Bump `version` in `package.json`, merge, then push a matching tag:
+
+```bash
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+GitHub Actions builds the installer and portable exe on Windows and publishes them to [Releases](https://github.com/tlowndes/folder-tidy/releases).
+
 ## Layout
 
 - `main.js`: Electron main process, tray, IPC
