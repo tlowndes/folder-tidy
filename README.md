@@ -8,6 +8,7 @@ A Windows app that keeps Downloads and Documents tidy. It watches those folders 
 - **Waiting:** a file is moved only after it has finished downloading and a short delay (5 minutes by default).
 - **Undo:** each move is logged for 30 days. Undo puts the file back where it was.
 - **Dry run:** shows what would move without moving anything.
+- **Check now:** looks at the files already sitting in your watched folders (top level only, not subfolders). It lists what would move, gives a reason for every file it would leave alone (no rule, rule turned off, no folder set, in use, still downloading and so on), and suggests rules for file types nothing matches. Nothing moves until you press Move. Also in the tray menu.
 
 ## Safety
 
@@ -33,6 +34,7 @@ npm run dist  # build the Windows installer and portable exe
 - `lib/rules.js`: rule matching
 - `lib/organiser.js`: plan, move and undo a file
 - `lib/watcher.js`: watches the folders
+- `lib/scan.js`: Check now, reasons and rule suggestions
 - `lib/mover.js`, `lib/history.js`, `lib/config.js`, `lib/safety.js`
 - `src/`: the UI
 

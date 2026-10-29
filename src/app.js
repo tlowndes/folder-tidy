@@ -20,6 +20,7 @@ const ICONS = {
   undo: '<path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   x: '<path d="M6 6l12 12M18 6L6 18"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>',
 };
 
 function icon(name) {
@@ -210,6 +211,7 @@ function renderAll() {
   renderRules();
   renderHistory();
   renderSettings();
+  renderCheck();
 }
 
 async function refresh() {
@@ -321,6 +323,156 @@ $('save-settings').addEventListener('click', async () => {
   });
   await refresh();
 });
+
+// ---------- Check ----------
+
+let check = null;          // the last check, from the main process
+let moveResults = null;    // what happened when "Move these" was pressed, by file path
+
+// Short labels for why a file was left. "fixable" ones can be sorted out with a rule change.
+const REASONS = {
+  'no-rule': { label: 'No rule', fixable: true },
+  'no-extension': { label: 'No file type' },
+  'no-destination': { label: 'No folder set', fixable: true },
+  'rule-off': { label: 'Rule off', fixable: true },
+  'name-mismatch': { label: 'Name filter', fixable: true },
+  'already-there': { label: 'Already sorted' },
+  downloading: { label: 'Downloading' },
+  'too-new': { label: 'Just changed' },
+  locked: { label: 'In use' },
+  protected: { label: 'Protected' },
+  unreadable: { label: 'Unreadable' },
+};
+
+// Fixable reasons first, so the files you can do something about are at the top.
+function reasonOrder(r) {
+  return REASONS[r.reason]?.fixable ? 0 : 1;
+}
+
+function renderCheck() {
+  $('check-empty').hidden = !!check;
+  $('check-results').hidden = !check;
+  if (!check) return;
+
+  const when = new Date(check.time).toLocaleTimeString([], { timeStyle: 'short' });
+  $('check-meta').textContent = `Checked at ${when}. ${plural(check.toMove.length, 'file')} ready to move, ${check.skipped.length} left alone.`
+    + (check.dryRun ? ' Dry run is on, so nothing will actually move.' : '');
+
+  $('move-title').textContent = `Ready to move (${check.toMove.length})`;
+  $('move-list').innerHTML = check.toMove.length
+    ? check.toMove.map((r) => {
+        const done = moveResults?.[r.file];
+        const status = !done ? ''
+          : done.ok ? `<span class="result-ok">${done.dryRun ? 'Would move' : 'Moved'}</span>`
+          : `<span class="result-fail">${esc(done.message)}</span>`;
+        return `
+          <li class="row-item">
+            <label class="check-row">
+              <input type="checkbox" class="move-pick" value="${esc(r.file)}" ${done ? 'disabled' : 'checked'}>
+              <span class="file-badge">${icon('file')}</span>
+              <div class="row-main">
+                <div class="row-title">${esc(baseName(r.file))}</div>
+                <div class="row-sub">${esc(r.message)}</div>
+              </div>
+            </label>
+            ${status}
+          </li>`;
+      }).join('')
+    : '<li class="empty">Nothing to move right now.</li>';
+  updateMoveButton();
+
+  $('suggest-card').hidden = check.suggestions.length === 0;
+  $('suggest-list').innerHTML = check.suggestions.map((s, i) => `
+    <li class="row-item">
+      <span class="file-badge">${icon('rules')}</span>
+      <div class="row-main">
+        <div class="row-title">${s.kind === 'extend'
+          ? `Add ${esc(s.extensions.join(', '))} to "${esc(s.name)}"`
+          : `New rule: ${esc(s.name)} (${esc(s.extensions.join(', '))})`}</div>
+        <div class="row-sub">${plural(s.count, 'file')}, such as ${esc(s.examples.join(', '))}</div>
+      </div>
+      <button class="btn btn-outline" data-suggest="${i}">${icon('plus')}${s.kind === 'extend' ? 'Add' : 'Add rule'}</button>
+    </li>`).join('');
+
+  const skipped = [...check.skipped].sort((a, b) => reasonOrder(a) - reasonOrder(b));
+  $('skip-title').textContent = `Left alone (${skipped.length})`;
+  $('skip-list').innerHTML = skipped.length
+    ? skipped.map((r) => {
+        const reason = REASONS[r.reason] || { label: r.reason };
+        return `
+          <li class="row-item">
+            <span class="file-badge">${icon('file')}</span>
+            <div class="row-main">
+              <div class="row-title" title="${esc(r.file)}">${esc(baseName(r.file))}</div>
+              <div class="row-sub">${esc(r.message)}</div>
+            </div>
+            <span class="reason ${reason.fixable ? 'fixable' : ''}">${esc(reason.label)}</span>
+          </li>`;
+      }).join('')
+    : '<li class="empty">Every file has somewhere to go.</li>';
+}
+
+function pickedFiles() {
+  return [...document.querySelectorAll('.move-pick:checked:not(:disabled)')].map((cb) => cb.value);
+}
+
+function updateMoveButton() {
+  const n = pickedFiles().length;
+  $('move-checked').disabled = n === 0;
+  $('move-checked').textContent = check?.dryRun ? `Try ${plural(n, 'file')} (dry run)` : `Move ${plural(n, 'file')}`;
+}
+
+async function runCheck() {
+  showPage('check');
+  $('run-check').disabled = true;
+  $('run-check').textContent = 'Checking…';
+  try {
+    check = await window.folderTidy.checkNow();
+    moveResults = null;
+    renderCheck();
+  } finally {
+    $('run-check').disabled = false;
+    $('run-check').textContent = 'Check again';
+  }
+}
+
+$('check-btn').addEventListener('click', runCheck);
+$('run-check').addEventListener('click', runCheck);
+$('move-list').addEventListener('change', updateMoveButton);
+
+$('move-checked').addEventListener('click', async () => {
+  const files = pickedFiles();
+  if (!files.length) return;
+  $('move-checked').disabled = true;
+  const results = await window.folderTidy.moveChecked(files);
+  moveResults = { ...(moveResults || {}), ...Object.fromEntries(results.map((r) => [r.file, r])) };
+  renderCheck();
+});
+
+// Applies a suggestion to the saved rules, then checks again so the lists update.
+$('suggest-list').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-suggest]');
+  if (!btn) return;
+  const s = check.suggestions[Number(btn.dataset.suggest)];
+  const rules = structuredClone(state.rules);
+
+  if (s.kind === 'extend') {
+    const rule = rules.find((r) => r.id === s.ruleId);
+    rule.extensions.push(...s.extensions.filter((ext) => !rule.extensions.includes(ext)));
+  } else {
+    const folder = await window.folderTidy.pickFolder(`Choose where "${s.name}" go`);
+    if (!folder) return;
+    rules.push({ id: `rule-${Date.now()}`, name: s.name, enabled: true, extensions: s.extensions, namePattern: '', destination: folder });
+  }
+
+  state = await window.folderTidy.saveRules(rules);
+  rulesDraft = null;
+  renderRules();
+  renderHome();
+  await runCheck();
+});
+
+window.folderTidy.onRunCheck(runCheck);
 
 // A background move only changes home and history. Rule and settings drafts are kept,
 // so unsaved edits are not lost while you are working.

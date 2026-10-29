@@ -21,6 +21,7 @@
 
     <nav class="nav">
       <button data-page="home" class="nav-btn active"><span data-icon="home"></span>Home</button>
+      <button data-page="check" class="nav-btn"><span data-icon="search"></span>Check</button>
       <button data-page="rules" class="nav-btn"><span data-icon="rules"></span>Rules</button>
       <button data-page="history" class="nav-btn"><span data-icon="history"></span>History</button>
       <button data-page="settings" class="nav-btn"><span data-icon="settings"></span>Settings</button>
@@ -48,7 +49,10 @@
           <div class="hero-title" id="hero-title">Watching 2 folders</div>
           <div class="hero-meta" id="hero-meta"></div>
         </div>
-        <button id="pause-btn" class="btn btn-light">Pause</button>
+        <div class="hero-actions">
+          <button id="check-btn" class="btn btn-light">Check now</button>
+          <button id="pause-btn" class="btn btn-light">Pause</button>
+        </div>
       </div>
 
       <div class="stats">
@@ -63,6 +67,41 @@
           <button class="link-btn" data-goto="history">View all</button>
         </div>
         <ul id="recent-list" class="rows"></ul>
+      </div>
+    </section>
+
+    <!-- CHECK -->
+    <section id="check" class="page">
+      <header class="page-head">
+        <div>
+          <h1>Check</h1>
+          <p class="sub">Looks at the files in your watched folders now, and says why anything is left behind.</p>
+        </div>
+        <button id="run-check" class="btn btn-primary">Check now</button>
+      </header>
+
+      <div id="check-empty" class="card empty">Press Check now to look at your folders. Nothing moves until you say so.</div>
+
+      <div id="check-results" hidden>
+        <p id="check-meta" class="check-meta"></p>
+
+        <div class="card">
+          <div class="card-head">
+            <h2 id="move-title">Ready to move</h2>
+            <button id="move-checked" class="btn btn-primary">Move these</button>
+          </div>
+          <ul id="move-list" class="rows"></ul>
+        </div>
+
+        <div class="card" id="suggest-card">
+          <div class="card-head"><h2>Suggested rules</h2></div>
+          <ul id="suggest-list" class="rows"></ul>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2 id="skip-title">Left alone</h2></div>
+          <ul id="skip-list" class="rows"></ul>
+        </div>
       </div>
     </section>
 

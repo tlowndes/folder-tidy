@@ -137,3 +137,68 @@ test('undoEntry: restores a moved file and reports when it is missing', () => {
   const again = { ...entry, undone: false, to: path.join(dest, 'gone.pdf') };
   assert.equal(undoEntry(again, history).reason, "Can't undo: file no longer there");
 });
+
+const { explainFile, scanFolders, suggestRules } = require('../lib/scan');
+
+// A file old enough that the "just changed" check does not apply.
+function oldFile(filePath, text = 'x') {
+  fs.writeFileSync(filePath, text);
+  const past = new Date(Date.now() - 60 * 1000);
+  fs.utimesSync(filePath, past, past);
+  return filePath;
+}
+
+test('explainFile: gives a reason for every file it would leave alone', () => {
+  const dir = tempDir();
+  const dest = path.join(dir, 'Docs');
+  const rules = [
+    { id: 'docs', name: 'Docs', enabled: true, extensions: ['.pdf'], namePattern: '', destination: dest },
+    { id: 'inv', name: 'Invoices', enabled: true, extensions: ['.xlsx'], namePattern: 'invoice', destination: dest },
+    { id: 'zip', name: 'Archives', enabled: false, extensions: ['.zip'], namePattern: '', destination: dest },
+    { id: 'img', name: 'Images', enabled: true, extensions: ['.png'], namePattern: '', destination: '' },
+  ];
+  const reason = (name, opts) => explainFile(oldFile(path.join(dir, name)), rules, opts).reason;
+
+  assert.equal(reason('report.pdf'), 'match');
+  assert.equal(reason('mystery.xyz'), 'no-rule');
+  assert.equal(reason('README'), 'no-extension');
+  assert.equal(reason('pack.zip'), 'rule-off');
+  assert.equal(reason('budget.xlsx'), 'name-mismatch');
+  assert.equal(reason('shot.png'), 'no-destination');
+  assert.equal(reason('film.crdownload'), 'downloading');
+  assert.equal(reason('locked.pdf', { locked: () => true }), 'locked');
+
+  fs.writeFileSync(path.join(dir, 'fresh.pdf'), 'x');
+  assert.equal(explainFile(path.join(dir, 'fresh.pdf'), rules).reason, 'too-new');
+
+  fs.mkdirSync(dest, { recursive: true });
+  assert.equal(explainFile(oldFile(path.join(dest, 'done.pdf')), rules).reason, 'already-there');
+});
+
+test('scanFolders: checks the top of each enabled folder only', () => {
+  const downloads = tempDir();
+  const other = tempDir();
+  oldFile(path.join(downloads, 'a.pdf'));
+  fs.mkdirSync(path.join(downloads, 'Mine'));
+  oldFile(path.join(downloads, 'Mine', 'b.pdf'));
+  oldFile(path.join(other, 'c.pdf'));
+  const rules = [{ id: 'docs', name: 'Docs', enabled: true, extensions: ['.pdf'], namePattern: '', destination: path.join(tempDir(), 'D') }];
+
+  const results = scanFolders([{ path: downloads, enabled: true }, { path: other, enabled: false }], rules);
+  assert.deepEqual(results.map((r) => path.basename(r.file)), ['a.pdf']);
+  assert.ok(fs.existsSync(path.join(downloads, 'a.pdf')), 'a scan never moves anything');
+});
+
+test('suggestRules: extends a matching default rule, or groups types into a new rule', () => {
+  const rules = DEFAULT_RULES.map((r) => ({ ...r, destination: 'X' }));
+  const results = ['a.svg', 'b.svg', 'c.psd', 'd.ai', 'e.qqq'].map((name) => ({ file: name, ext: path.extname(name), reason: 'no-rule' }));
+  results.push({ file: 'f.pdf', ext: '.pdf', reason: 'match' });
+
+  const suggestions = suggestRules(results, rules);
+  assert.deepEqual(suggestions[0], { kind: 'extend', ruleId: 'images', name: 'Images', extensions: ['.svg'], count: 2, examples: ['a.svg', 'b.svg'] });
+  const design = suggestions.find((s) => s.name === 'Design files');
+  assert.deepEqual(design.extensions, ['.psd', '.ai']);
+  assert.equal(design.count, 2);
+  assert.ok(suggestions.some((s) => s.kind === 'new' && s.name === 'QQQ files'));
+  assert.equal(suggestions.length, 3);
+});

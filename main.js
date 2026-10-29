@@ -6,7 +6,8 @@ const os = require('os');
 const { Config } = require('./lib/config');
 const { History } = require('./lib/history');
 const { Watcher } = require('./lib/watcher');
-const { undoEntry } = require('./lib/organiser');
+const { undoEntry, applyPlan } = require('./lib/organiser');
+const { scanFolders, suggestRules, explainFile } = require('./lib/scan');
 
 const DATA_DIR = path.join(app.getPath('appData'), 'folder-tidy');
 const DEFAULT_SOURCES = [
@@ -68,6 +69,52 @@ function undoById(id) {
   return result;
 }
 
+// Looks at every file in the watched folders now, without moving anything.
+function checkNow() {
+  const results = scanFolders(config.data.sources, config.data.rules);
+  return {
+    time: new Date().toISOString(),
+    dryRun: config.data.settings.dryRun,
+    toMove: results.filter((r) => r.action === 'move'),
+    skipped: results.filter((r) => r.action === 'skip'),
+    suggestions: suggestRules(results, config.data.rules),
+  };
+}
+
+// Moves the files picked from a check. Each one is checked again first, as things may
+// have changed since the preview. Returns what happened to each file.
+function moveChecked(files) {
+  const { dryRun } = config.data.settings;
+  const watched = config.data.sources.filter((s) => s.enabled).map((s) => path.resolve(s.path).toLowerCase());
+  const results = files.map((file) => {
+    // Only files straight inside a watched folder, which is all a check ever offers.
+    if (!watched.includes(path.resolve(path.dirname(file)).toLowerCase())) {
+      return { file, ok: false, message: 'Not in a watched folder' };
+    }
+    try {
+      const plan = explainFile(file, config.data.rules);
+      if (plan.action !== 'move') return { file, ok: false, message: plan.message };
+      const done = applyPlan({ from: file, destDir: plan.destDir, ruleId: plan.ruleId }, { dryRun, history });
+      return { file, ok: true, to: done.to, dryRun };
+    } catch (err) {
+      const message = err.code === 'ENOENT' ? 'No longer there'
+        : ['EBUSY', 'EPERM', 'EACCES'].includes(err.code) ? 'Open in another app, or read-only'
+        : err.message;
+      return { file, ok: false, message };
+    }
+  });
+  refreshUi();
+  const moved = results.filter((r) => r.ok).length;
+  if (moved) notify('Folder Tidy', dryRun ? `Dry run: would move ${moved} files` : `Moved ${moved} files`);
+  return results;
+}
+
+function showCheck() {
+  win.show();
+  win.focus();
+  win.webContents.send('run-check');
+}
+
 function setLoginItem(enabled) {
   app.setLoginItemSettings({ openAtLogin: enabled });
 }
@@ -105,6 +152,7 @@ function createTray() {
     tray.setContextMenu(Menu.buildFromTemplate([
       { label: 'Open', click: () => { win.show(); win.focus(); } },
       { label: watcher.paused ? 'Resume' : 'Pause', click: () => { watcher.paused ? watcher.resume() : watcher.pause(); rebuild(); refreshUi(); } },
+      { label: 'Check now', click: () => showCheck() },
       { label: 'Undo last move', click: () => {
         const last = history.undoable(1)[0];
         if (last) undoById(last.id);
@@ -142,6 +190,8 @@ ipcMain.handle('save-settings', (_e, settings) => {
   return state();
 });
 ipcMain.handle('undo', (_e, id) => undoById(id));
+ipcMain.handle('check-now', () => checkNow());
+ipcMain.handle('move-checked', (_e, files) => moveChecked(files));
 ipcMain.handle('open-folder', (_e, folder) => shell.openPath(folder));
 ipcMain.handle('pick-folder', async (_e, title) => {
   const result = await dialog.showOpenDialog(win, {

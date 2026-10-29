@@ -12,5 +12,8 @@ contextBridge.exposeInMainWorld('folderTidy', {
   undo: (id) => ipcRenderer.invoke('undo', id),
   openFolder: (folder) => ipcRenderer.invoke('open-folder', folder),
   pickFolder: (title) => ipcRenderer.invoke('pick-folder', title),
+  checkNow: () => ipcRenderer.invoke('check-now'),
+  moveChecked: (files) => ipcRenderer.invoke('move-checked', files),
+  onRunCheck: (callback) => ipcRenderer.on('run-check', () => callback()),
   onStateChanged: (callback) => ipcRenderer.on('state-changed', () => callback()),
 });
