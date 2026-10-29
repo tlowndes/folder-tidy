@@ -1,0 +1,26 @@
+name: Release
+
+# Builds the Windows installer and portable exe, and publishes them to GitHub Releases.
+# Runs when a version tag is pushed, e.g. `git tag v0.2.0 && git push origin v0.2.0`.
+# The tag must match the version in package.json.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run dist -- --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
