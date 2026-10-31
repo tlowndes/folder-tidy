@@ -185,9 +185,57 @@ function renderHistory() {
     : '<tr><td colspan="4" class="empty">No moves yet.</td></tr>';
 }
 
+// What the update row says for each updater status.
+const UPDATE_TEXT = {
+  unavailable: 'Updates only work in the installed app.',
+  idle: 'Not checked yet.',
+  checking: 'Checking for updates…',
+  'up-to-date': "You're on the latest version.",
+  downloading: 'Downloading version {v}…',
+  ready: 'Version {v} is ready to install.',
+  error: "Couldn't check for updates. Try again later.",
+};
+
+function renderUpdate() {
+  const { status, version, current } = state.update;
+  $('update-version').textContent = `Folder Tidy ${current}`;
+  $('update-status').textContent = UPDATE_TEXT[status].replace('{v}', version || '');
+  const btn = $('update-btn');
+  btn.textContent = status === 'ready' ? 'Restart and update' : 'Check for updates';
+  btn.disabled = ['unavailable', 'checking', 'downloading'].includes(status);
+}
+
+$('update-btn').addEventListener('click', async () => {
+  if (state.update.status === 'ready') return window.folderTidy.installUpdate();
+  state = await window.folderTidy.checkUpdates();
+  renderUpdate();
+});
+
+const NOTIFY_HELP = {
+  each: 'A pop-up every time a file moves.',
+  daily: 'One pop-up a day with what moved and anything that needs a look.',
+  off: 'No pop-ups. Everything is still in History.',
+};
+
+function notifyMode() {
+  return document.querySelector('[name="s-notify"]:checked')?.value || 'daily';
+}
+
+function renderNotifyHelp() {
+  $('notify-help').textContent = NOTIFY_HELP[notifyMode()];
+  $('digest-time-row').classList.toggle('hidden', notifyMode() !== 'daily');
+}
+
+document.querySelectorAll('[name="s-notify"]').forEach((r) => r.addEventListener('change', renderNotifyHelp));
+
 function renderSettings() {
   $('s-login').checked = state.settings.startWithWindows;
   $('s-dry').checked = state.settings.dryRun;
+  $('s-update').checked = state.settings.autoUpdate;
+  document.querySelectorAll('[name="s-notify"]').forEach((r) => { r.checked = r.value === state.settings.notifications; });
+  $('s-digest-time').value = state.settings.digestTime;
+  renderNotifyHelp();
+  renderUpdate();
   $('s-delay').value = state.settings.delaySeconds;
   $('s-delay-label').textContent = `${Math.round(state.settings.delaySeconds / 60)} min`;
 
@@ -319,6 +367,9 @@ $('save-settings').addEventListener('click', async () => {
   state = await window.folderTidy.saveSettings({
     startWithWindows: $('s-login').checked,
     dryRun: $('s-dry').checked,
+    autoUpdate: $('s-update').checked,
+    notifications: notifyMode(),
+    digestTime: $('s-digest-time').value || '18:00',
     delaySeconds: Number($('s-delay').value),
   });
   await refresh();
@@ -328,6 +379,15 @@ $('save-settings').addEventListener('click', async () => {
 
 let check = null;          // the last check, from the main process
 let moveResults = null;    // what happened when "Move these" was pressed, by file path
+let binResults = null;     // what happened when "Send to Recycle Bin" was pressed, by file path
+
+const CLUTTER_KINDS = { duplicate: 'Duplicate', installer: 'Old installer', partial: 'Unfinished' };
+
+function formatSize(bytes) {
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+  if (bytes >= 1024 ** 2) return `${Math.round(bytes / 1024 ** 2)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
 
 // Short labels for why a file was left. "fixable" ones can be sorted out with a rule change.
 const REASONS = {
@@ -381,6 +441,29 @@ function renderCheck() {
     : '<li class="empty">Nothing to move right now.</li>';
   updateMoveButton();
 
+  $('clutter-card').hidden = check.clutter.length === 0;
+  const clutterSize = check.clutter.reduce((sum, c) => sum + c.size, 0);
+  $('clutter-title').textContent = `Old clutter (${check.clutter.length}, ${formatSize(clutterSize)})`;
+  $('clutter-list').innerHTML = check.clutter.map((c) => {
+    const done = binResults?.[c.file];
+    const status = !done ? `<span class="kind-tag">${CLUTTER_KINDS[c.kind]}</span>`
+      : done.ok ? `<span class="result-ok">${done.dryRun ? 'Would bin' : 'Binned'}</span>`
+      : `<span class="result-fail">${esc(done.message)}</span>`;
+    return `
+      <li class="row-item">
+        <label class="check-row">
+          <input type="checkbox" class="bin-pick" value="${esc(c.file)}" ${done ? 'disabled' : 'checked'}>
+          <span class="file-badge">${icon('file')}</span>
+          <div class="row-main">
+            <div class="row-title" title="${esc(c.file)}">${esc(baseName(c.file))}</div>
+            <div class="row-sub">${esc(c.message)} · ${formatSize(c.size)}</div>
+          </div>
+        </label>
+        ${status}
+      </li>`;
+  }).join('');
+  updateBinButton();
+
   $('suggest-card').hidden = check.suggestions.length === 0;
   $('suggest-list').innerHTML = check.suggestions.map((s, i) => `
     <li class="row-item">
@@ -422,6 +505,29 @@ function updateMoveButton() {
   $('move-checked').textContent = check?.dryRun ? `Try ${plural(n, 'file')} (dry run)` : `Move ${plural(n, 'file')}`;
 }
 
+function pickedClutter() {
+  return [...document.querySelectorAll('.bin-pick:checked:not(:disabled)')].map((cb) => cb.value);
+}
+
+function updateBinButton() {
+  const picked = pickedClutter();
+  $('bin-checked').disabled = picked.length === 0;
+  $('bin-checked').textContent = picked.length
+    ? `${check.dryRun ? 'Try binning' : 'Bin'} ${plural(picked.length, 'file')}`
+    : 'Send to Recycle Bin';
+}
+
+$('clutter-list').addEventListener('change', updateBinButton);
+
+$('bin-checked').addEventListener('click', async () => {
+  const files = pickedClutter();
+  if (!files.length) return;
+  $('bin-checked').disabled = true;
+  const results = await window.folderTidy.binFiles(files);
+  binResults = { ...(binResults || {}), ...Object.fromEntries(results.map((r) => [r.file, r])) };
+  renderCheck();
+});
+
 async function runCheck() {
   showPage('check');
   $('run-check').disabled = true;
@@ -429,6 +535,7 @@ async function runCheck() {
   try {
     check = await window.folderTidy.checkNow();
     moveResults = null;
+    binResults = null;
     renderCheck();
   } finally {
     $('run-check').disabled = false;
@@ -473,6 +580,7 @@ $('suggest-list').addEventListener('click', async (e) => {
 });
 
 window.folderTidy.onRunCheck(runCheck);
+window.folderTidy.onShowPage(showPage);
 
 // A background move only changes home and history. Rule and settings drafts are kept,
 // so unsaved edits are not lost while you are working.
@@ -480,5 +588,6 @@ window.folderTidy.onStateChanged(async () => {
   state = await window.folderTidy.getState();
   renderHome();
   renderHistory();
+  renderUpdate();
 });
 refresh();

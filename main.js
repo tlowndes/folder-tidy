@@ -8,6 +8,9 @@ const { History } = require('./lib/history');
 const { Watcher } = require('./lib/watcher');
 const { undoEntry, applyPlan } = require('./lib/organiser');
 const { scanFolders, suggestRules, explainFile } = require('./lib/scan');
+const { Updater } = require('./lib/updater');
+const { NEEDS_LOOK, isDue, buildDigest } = require('./lib/digest');
+const { findClutter } = require('./lib/clutter');
 
 const DATA_DIR = path.join(app.getPath('appData'), 'folder-tidy');
 const DEFAULT_SOURCES = [
@@ -26,13 +29,39 @@ const config = new Config(path.join(DATA_DIR, 'config.json'), DEFAULT_SOURCES);
 const history = new History(path.join(DATA_DIR, 'history.json'), config.data.settings.historyDays);
 let win = null;
 let tray = null;
+let rebuildTray = () => {};
 
 // .ico holds every size, so Windows picks a crisp one for the tray at any display scale.
 const ICON_PATH = path.join(__dirname, 'assets', process.platform === 'win32' ? 'icon.ico' : 'icon.png');
 const TRAY_ICON_PATH = process.platform === 'win32' ? ICON_PATH : path.join(__dirname, 'assets', 'tray.png');
 
-function notify(title, body) {
-  if (Notification.isSupported()) new Notification({ title, body }).show();
+function notify(title, body, onClick) {
+  if (!Notification.isSupported()) return;
+  const n = new Notification({ title, body });
+  if (onClick) n.on('click', onClick);
+  n.show();
+}
+
+// Dry-run moves aren't in the history, so the digest counts them here.
+let dryRunCount = 0;
+
+// Sends the daily summary once its time has passed. Checked every minute.
+function sendDigestIfDue(now = Date.now()) {
+  const { notifications, digestTime, digestLastSent } = config.data.settings;
+  if (notifications !== 'daily' || !isDue(now, digestTime, digestLastSent)) return;
+  const since = digestLastSent ? new Date(digestLastSent).getTime() : now - 24 * 60 * 60 * 1000;
+  const moves = history.entries.filter((e) => new Date(e.time).getTime() > since);
+  let needsLook = 0;
+  try {
+    needsLook = scanFolders(config.data.sources, config.data.rules).filter((r) => NEEDS_LOOK.includes(r.reason)).length;
+  } catch (err) {
+    console.error('[folder-tidy] digest scan', err);
+  }
+  const digest = buildDigest({ moves, dryRunCount, needsLook, rules: config.data.rules });
+  if (digest) notify(digest.title, digest.body, () => (needsLook ? showCheck() : showPage('history')));
+  dryRunCount = 0;
+  config.data.settings.digestLastSent = new Date(now).toISOString();
+  config.save();
 }
 
 function refreshUi() {
@@ -45,6 +74,11 @@ const watcher = new Watcher({
   history,
   onMove: (result) => {
     refreshUi();
+    const mode = config.data.settings.notifications;
+    if (mode !== 'each') {
+      if (result.dryRun) dryRunCount += 1;
+      return;
+    }
     if (result.dryRun) {
       notify('Folder Tidy (dry run)', `Would move ${path.basename(result.from)} to ${result.destDir}`);
     } else {
@@ -52,6 +86,13 @@ const watcher = new Watcher({
     }
   },
   onError: (err) => console.error('[folder-tidy]', err),
+});
+
+const updater = new Updater({
+  app,
+  notify,
+  isEnabled: () => config.data.settings.autoUpdate,
+  onChange: () => { rebuildTray(); refreshUi(); },
 });
 
 function startWatching() {
@@ -65,6 +106,7 @@ function state() {
     settings: config.data.settings,
     paused: watcher.paused,
     recent: history.entries.slice(0, 50),
+    update: { status: updater.status, version: updater.version, current: app.getVersion() },
   };
 }
 
@@ -76,13 +118,34 @@ function undoById(id) {
   return result;
 }
 
+// Files the last check offered to bin. Only these can be binned, so the UI can never
+// send anything else to the Recycle Bin.
+let lastClutter = new Set();
+
+// Where clutter is looked for: the watched folders, plus the Installers rule's folder.
+function clutterFolders() {
+  const folders = config.data.sources.filter((s) => s.enabled).map((s) => s.path);
+  const installers = config.data.rules.find((r) => r.id === 'installers' && r.enabled && r.destination);
+  if (installers) folders.push(installers.destination);
+  return folders;
+}
+
 // Looks at every file in the watched folders now, without moving anything.
 function checkNow() {
   const results = scanFolders(config.data.sources, config.data.rules);
+  let clutter = [];
+  try {
+    clutter = findClutter(clutterFolders());
+  } catch (err) {
+    console.error('[folder-tidy] clutter', err);
+  }
+  lastClutter = new Set(clutter.map((c) => c.file));
   return {
     time: new Date().toISOString(),
     dryRun: config.data.settings.dryRun,
-    toMove: results.filter((r) => r.action === 'move'),
+    clutter,
+    // Clutter is offered for the bin instead, so it isn't also offered for a move.
+    toMove: results.filter((r) => r.action === 'move' && !lastClutter.has(r.file)),
     skipped: results.filter((r) => r.action === 'skip'),
     suggestions: suggestRules(results, config.data.rules),
   };
@@ -116,10 +179,42 @@ function moveChecked(files) {
   return results;
 }
 
+// Sends files from the last check to the Recycle Bin, so they can still be restored.
+async function binFiles(files) {
+  const { dryRun } = config.data.settings;
+  const results = [];
+  for (const file of files) {
+    if (!lastClutter.has(file)) {
+      results.push({ file, ok: false, message: 'Not offered by the last check' });
+      continue;
+    }
+    if (dryRun) {
+      results.push({ file, ok: true, dryRun });
+      continue;
+    }
+    try {
+      await shell.trashItem(file);
+      lastClutter.delete(file);
+      results.push({ file, ok: true });
+    } catch (err) {
+      results.push({ file, ok: false, message: /no such file|ENOENT/i.test(err.message) ? 'No longer there' : 'Open in another app, or read-only' });
+    }
+  }
+  const binned = results.filter((r) => r.ok).length;
+  if (binned) notify('Folder Tidy', dryRun ? `Dry run: would bin ${binned} files` : `Sent ${binned} files to the Recycle Bin`);
+  return results;
+}
+
 function showCheck() {
   win.show();
   win.focus();
   win.webContents.send('run-check');
+}
+
+function showPage(page) {
+  win.show();
+  win.focus();
+  win.webContents.send('show-page', page);
 }
 
 function setLoginItem(enabled) {
@@ -157,7 +252,7 @@ function createTray() {
   if (icon.isEmpty()) console.warn(`Tray icon not found at ${TRAY_ICON_PATH}`);
   tray = new Tray(icon);
   tray.setToolTip('Folder Tidy');
-  const rebuild = () => {
+  const rebuild = rebuildTray = () => {
     tray.setContextMenu(Menu.buildFromTemplate([
       { label: 'Open', click: () => { win.show(); win.focus(); } },
       { label: watcher.paused ? 'Resume' : 'Pause', click: () => { watcher.paused ? watcher.resume() : watcher.pause(); rebuild(); refreshUi(); } },
@@ -168,6 +263,9 @@ function createTray() {
         else notify('Folder Tidy', 'Nothing to undo');
       } },
       { type: 'separator' },
+      updater.status === 'ready'
+        ? { label: `Restart to update (${updater.version})`, click: () => updater.installNow() }
+        : { label: 'Check for updates', click: () => updater.check(true) },
       { label: 'Quit', click: () => { app.isQuitting = true; app.quit(); } },
     ]));
   };
@@ -200,7 +298,10 @@ ipcMain.handle('save-settings', (_e, settings) => {
 });
 ipcMain.handle('undo', (_e, id) => undoById(id));
 ipcMain.handle('check-now', () => checkNow());
+ipcMain.handle('check-updates', () => { updater.check(true); return state(); });
+ipcMain.handle('install-update', () => updater.installNow());
 ipcMain.handle('move-checked', (_e, files) => moveChecked(files));
+ipcMain.handle('bin-files', (_e, files) => binFiles(files));
 ipcMain.handle('open-folder', (_e, folder) => shell.openPath(folder));
 ipcMain.handle('pick-folder', async (_e, title) => {
   const result = await dialog.showOpenDialog(win, {
@@ -215,6 +316,9 @@ app.whenReady().then(() => {
   createTray();
   startWatching();
   setLoginItem(config.data.settings.startWithWindows);
+  updater.start();
+  sendDigestIfDue();
+  setInterval(() => sendDigestIfDue(), 60 * 1000);
   app.on('activate', () => { win.show(); });
 });
 
@@ -224,5 +328,6 @@ app.on('second-instance', () => {
 
 app.on('before-quit', () => {
   watcher.stop();
+  updater.stop();
   config.save();
 });

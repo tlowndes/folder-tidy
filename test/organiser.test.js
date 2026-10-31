@@ -8,7 +8,7 @@ const path = require('path');
 const { DEFAULT_RULES, matchRule } = require('../lib/rules');
 const { uniquePath, moveFile, moveBack } = require('../lib/mover');
 const { History } = require('../lib/history');
-const { isProtectedPath, isPartialDownload } = require('../lib/safety');
+const { isProtectedPath, isPartialDownload, isTopLevel } = require('../lib/safety');
 const { planFile, applyPlan, undoEntry } = require('../lib/organiser');
 
 // Test folders live inside the project, not in the temp folder. The temp folder is under
@@ -201,4 +201,77 @@ test('suggestRules: extends a matching default rule, or groups types into a new 
   assert.equal(design.count, 2);
   assert.ok(suggestions.some((s) => s.kind === 'new' && s.name === 'QQQ files'));
   assert.equal(suggestions.length, 3);
+});
+
+test('isTopLevel: only files straight inside a watched folder are tidied', () => {
+  const docs = path.join(path.sep, 'home', 'tom', 'Documents');
+  assert.equal(isTopLevel(path.join(docs, 'invoice.pdf'), [docs]), true);
+  assert.equal(isTopLevel(path.join(docs, 'Work', 'Client', 'brief.pdf'), [docs]), false);
+  assert.equal(isTopLevel(path.join(docs, 'Sorted', 'old.pdf'), [docs]), false);
+  assert.equal(isTopLevel(path.join(docs.toUpperCase(), 'a.pdf'), [docs]), true, 'case does not matter on Windows');
+  assert.equal(isTopLevel(path.join(docs, 'a.pdf'), []), false);
+});
+
+test('canUpdate: only the installed app updates itself', () => {
+  const { canUpdate } = require('../lib/updater');
+  assert.equal(canUpdate({ isPackaged: true }, {}), true);
+  assert.equal(canUpdate({ isPackaged: false }, {}), false, 'dev build');
+  assert.equal(canUpdate({ isPackaged: true }, { PORTABLE_EXECUTABLE_DIR: 'C:\\x' }), false, 'portable exe');
+});
+
+test('digest isDue: once a day after the set time, catching up if the PC was off', () => {
+  const { isDue } = require('../lib/digest');
+  const at = (d, h, m = 0) => new Date(2026, 9, d, h, m).getTime();
+  assert.equal(isDue(at(31, 17, 59), '18:00', null), false, 'before the time');
+  assert.equal(isDue(at(31, 18, 0), '18:00', null), true);
+  assert.equal(isDue(at(31, 21), '18:00', new Date(at(31, 18, 1)).toISOString()), false, 'already sent today');
+  assert.equal(isDue(at(31, 9), '18:00', new Date(at(29, 18)).toISOString()), false, 'not yet today');
+  assert.equal(isDue(at(31, 19), '18:00', new Date(at(29, 18)).toISOString()), true, 'catches up after a day off');
+});
+
+test('buildDigest: summarises moves, dry runs and files that need a look', () => {
+  const { buildDigest } = require('../lib/digest');
+  const rules = [{ id: 'images', name: 'Images' }, { id: 'documents', name: 'Documents' }];
+  const moves = [{ ruleId: 'images' }, { ruleId: 'images' }, { ruleId: 'documents' }, { ruleId: 'images', undone: true }];
+  assert.equal(buildDigest({ moves: [], rules }), null, 'nothing to say');
+  assert.deepEqual(buildDigest({ moves, needsLook: 2, rules }), {
+    title: 'Your tidy-up today',
+    body: 'Moved 3 files (Images 2, Documents 1). 2 files need a look.',
+  });
+  assert.equal(buildDigest({ moves: [], dryRunCount: 1, needsLook: 1, rules }).body, 'Dry run: would have moved 1 file. 1 file needs a look.');
+});
+
+test('findClutter: duplicates, old installers and stalled downloads, top level only', () => {
+  const { findClutter } = require('../lib/clutter');
+  const dir = tempDir();
+  const other = tempDir();
+  const write = (p, body, daysOld = 0) => {
+    fs.writeFileSync(p, body);
+    const t = (Date.now() - daysOld * 864e5) / 1000;
+    fs.utimesSync(p, t, t);
+    return p;
+  };
+  write(path.join(dir, 'photo.jpg'), 'same', 5);
+  write(path.join(dir, 'photo (2).jpg'), 'same', 1);
+  write(path.join(other, 'photo copy.jpg'), 'same', 2);
+  write(path.join(dir, 'different.jpg'), 'diff', 1);
+  write(path.join(dir, 'setup.exe'), 'installer-old', 45);
+  write(path.join(dir, 'new-setup.exe'), 'installer-new', 3);
+  write(path.join(dir, 'film.mp4.crdownload'), 'partial', 10);
+  write(path.join(dir, 'fresh.crdownload'), 'partial-new', 1);
+  write(path.join(dir, 'empty-a.txt'), '', 1);
+  write(path.join(dir, 'empty-b.txt'), '', 1);
+  fs.mkdirSync(path.join(dir, 'Mine'));
+  write(path.join(dir, 'Mine', 'photo.jpg'), 'same', 9);
+
+  const found = findClutter([dir, other]);
+  const byName = Object.fromEntries(found.map((c) => [path.basename(c.file), c]));
+  assert.deepEqual(Object.keys(byName).sort(), ['film.mp4.crdownload', 'photo (2).jpg', 'photo copy.jpg', 'setup.exe']);
+  assert.equal(byName['photo (2).jpg'].kind, 'duplicate');
+  assert.equal(byName['photo (2).jpg'].message, 'Same as photo.jpg');
+  assert.match(byName['photo copy.jpg'].message, /^Same as photo\.jpg in /);
+  assert.equal(byName['setup.exe'].kind, 'installer');
+  assert.equal(byName['film.mp4.crdownload'].kind, 'partial');
+  assert.equal(found[0].kind, 'duplicate', 'duplicates come first');
+  assert.ok(fs.existsSync(path.join(dir, 'setup.exe')), 'finding never deletes');
 });
