@@ -302,6 +302,7 @@ td.action { text-align: right; }
 .segmented input:focus-visible + span { outline: 2px solid var(--accent-soft); }
 .time-input { width: auto; }
 .hidden { display: none; }
+.btn.small { padding: 5px 10px; font-size: 12.5px; white-space: nowrap; }
 .invisible { visibility: hidden; }
 .row-title .muted { color: var(--muted); font-weight: 500; font-size: 12.5px; margin-left: 4px; }
 

@@ -1,0 +1,25 @@
+name: Tests
+
+# Runs the tests on every pull request and on main, on Windows (where the app runs)
+# and Linux (to catch anything that only works by luck on one system).
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      # Scripts are skipped so Electron itself isn't downloaded; the tests don't need it.
+      - run: npm ci --ignore-scripts
+      - run: npm test

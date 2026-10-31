@@ -578,6 +578,7 @@ const REASONS = {
   'too-new': { label: 'Just changed' },
   locked: { label: 'In use' },
   protected: { label: 'Protected' },
+  ignored: { label: 'Ignored' },
   unreadable: { label: 'Unreadable' },
 };
 
@@ -612,7 +613,7 @@ function renderCheck() {
                 <div class="row-sub">${esc(r.message)}</div>
               </div>
             </label>
-            ${status}
+            ${done ? status : ignoreBtn(r.file)}
           </li>`;
       }).join('')
     : '<li class="empty">Nothing to move right now.</li>';
@@ -636,6 +637,7 @@ function renderCheck() {
             <div class="row-sub">${esc(c.message)} · ${formatSize(c.size)}</div>
           </div>
         </label>
+        ${done ? '' : ignoreBtn(c.file)}
         ${status}
       </li>`;
   }).join('');
@@ -666,11 +668,27 @@ function renderCheck() {
               <div class="row-title" title="${esc(r.file)}">${esc(baseName(r.file))}</div>
               <div class="row-sub">${esc(r.message)}</div>
             </div>
-            <span class="reason ${reason.fixable ? 'fixable' : ''}">${esc(reason.label)}</span>
+            ${r.reason === 'ignored'
+              ? `<button class="btn btn-ghost small" data-unignore="${esc(r.file)}">Stop ignoring</button>`
+              : `<span class="reason ${reason.fixable ? 'fixable' : ''}">${esc(reason.label)}</span>`}
           </li>`;
       }).join('')
     : '<li class="empty">Every file has somewhere to go.</li>';
 }
+
+function ignoreBtn(file) {
+  return `<button class="btn btn-ghost small" data-ignore="${esc(file)}" title="Never move or bin this file">Leave alone</button>`;
+}
+
+// "Leave alone" and "Stop ignoring" work from any list on the Check page.
+$('check-results').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-ignore], [data-unignore]');
+  if (!btn) return;
+  btn.disabled = true;
+  const ignore = btn.hasAttribute('data-ignore');
+  check = await window.folderTidy.setIgnored(ignore ? btn.dataset.ignore : btn.dataset.unignore, ignore);
+  renderCheck();
+});
 
 function pickedFiles() {
   return [...document.querySelectorAll('.move-pick:checked:not(:disabled)')].map((cb) => cb.value);
