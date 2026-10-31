@@ -15,6 +15,9 @@ const DEFAULT_SOURCES = [
   path.join(os.homedir(), 'Documents'),
 ];
 
+// Matches build.appId, so Windows ties notifications and the taskbar entry to the app's icon.
+if (process.platform === 'win32') app.setAppUserModelId('uk.co.tomlowndes.foldertidy');
+
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 }
@@ -23,6 +26,10 @@ const config = new Config(path.join(DATA_DIR, 'config.json'), DEFAULT_SOURCES);
 const history = new History(path.join(DATA_DIR, 'history.json'), config.data.settings.historyDays);
 let win = null;
 let tray = null;
+
+// .ico holds every size, so Windows picks a crisp one for the tray at any display scale.
+const ICON_PATH = path.join(__dirname, 'assets', process.platform === 'win32' ? 'icon.ico' : 'icon.png');
+const TRAY_ICON_PATH = process.platform === 'win32' ? ICON_PATH : path.join(__dirname, 'assets', 'tray.png');
 
 function notify(title, body) {
   if (Notification.isSupported()) new Notification({ title, body }).show();
@@ -126,6 +133,7 @@ function createWindow() {
     minWidth: 760,
     minHeight: 520,
     title: 'Folder Tidy',
+    icon: ICON_PATH,
     backgroundColor: '#f6f6f6',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -145,7 +153,8 @@ function createWindow() {
 }
 
 function createTray() {
-  const icon = nativeImage.createEmpty();
+  const icon = nativeImage.createFromPath(TRAY_ICON_PATH);
+  if (icon.isEmpty()) console.warn(`Tray icon not found at ${TRAY_ICON_PATH}`);
   tray = new Tray(icon);
   tray.setToolTip('Folder Tidy');
   const rebuild = () => {

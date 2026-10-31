@@ -26,9 +26,11 @@
       "main.js",
       "preload.js",
       "lib/**",
-      "src/**"
+      "src/**",
+      "assets/**"
     ],
     "win": {
+      "icon": "assets/icon.ico",
       "target": [
         "nsis",
         "portable"
