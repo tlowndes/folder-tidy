@@ -8,6 +8,7 @@ const { History } = require('./lib/history');
 const { Watcher } = require('./lib/watcher');
 const { undoEntry, applyPlan } = require('./lib/organiser');
 const { scanFolders, suggestRules, explainFile } = require('./lib/scan');
+const { Updater } = require('./lib/updater');
 
 const DATA_DIR = path.join(app.getPath('appData'), 'folder-tidy');
 const DEFAULT_SOURCES = [
@@ -23,6 +24,7 @@ const config = new Config(path.join(DATA_DIR, 'config.json'), DEFAULT_SOURCES);
 const history = new History(path.join(DATA_DIR, 'history.json'), config.data.settings.historyDays);
 let win = null;
 let tray = null;
+let rebuildTray = () => {};
 
 function notify(title, body) {
   if (Notification.isSupported()) new Notification({ title, body }).show();
@@ -47,6 +49,13 @@ const watcher = new Watcher({
   onError: (err) => console.error('[folder-tidy]', err),
 });
 
+const updater = new Updater({
+  app,
+  notify,
+  isEnabled: () => config.data.settings.autoUpdate,
+  onChange: () => { rebuildTray(); refreshUi(); },
+});
+
 function startWatching() {
   watcher.start(config.data.sources);
 }
@@ -58,6 +67,7 @@ function state() {
     settings: config.data.settings,
     paused: watcher.paused,
     recent: history.entries.slice(0, 50),
+    update: { status: updater.status, version: updater.version, current: app.getVersion() },
   };
 }
 
@@ -148,7 +158,7 @@ function createTray() {
   const icon = nativeImage.createEmpty();
   tray = new Tray(icon);
   tray.setToolTip('Folder Tidy');
-  const rebuild = () => {
+  const rebuild = rebuildTray = () => {
     tray.setContextMenu(Menu.buildFromTemplate([
       { label: 'Open', click: () => { win.show(); win.focus(); } },
       { label: watcher.paused ? 'Resume' : 'Pause', click: () => { watcher.paused ? watcher.resume() : watcher.pause(); rebuild(); refreshUi(); } },
@@ -159,6 +169,9 @@ function createTray() {
         else notify('Folder Tidy', 'Nothing to undo');
       } },
       { type: 'separator' },
+      updater.status === 'ready'
+        ? { label: `Restart to update (${updater.version})`, click: () => updater.installNow() }
+        : { label: 'Check for updates', click: () => updater.check(true) },
       { label: 'Quit', click: () => { app.isQuitting = true; app.quit(); } },
     ]));
   };
@@ -191,6 +204,8 @@ ipcMain.handle('save-settings', (_e, settings) => {
 });
 ipcMain.handle('undo', (_e, id) => undoById(id));
 ipcMain.handle('check-now', () => checkNow());
+ipcMain.handle('check-updates', () => { updater.check(true); return state(); });
+ipcMain.handle('install-update', () => updater.installNow());
 ipcMain.handle('move-checked', (_e, files) => moveChecked(files));
 ipcMain.handle('open-folder', (_e, folder) => shell.openPath(folder));
 ipcMain.handle('pick-folder', async (_e, title) => {
@@ -206,6 +221,7 @@ app.whenReady().then(() => {
   createTray();
   startWatching();
   setLoginItem(config.data.settings.startWithWindows);
+  updater.start();
   app.on('activate', () => { win.show(); });
 });
 
@@ -215,5 +231,6 @@ app.on('second-instance', () => {
 
 app.on('before-quit', () => {
   watcher.stop();
+  updater.stop();
   config.save();
 });

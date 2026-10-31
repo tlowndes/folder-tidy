@@ -9,6 +9,7 @@ A Windows app that keeps Downloads and Documents tidy. It watches those folders 
 - **Undo:** each move is logged for 30 days. Undo puts the file back where it was.
 - **Dry run:** shows what would move without moving anything.
 - **Check now:** looks at the files already sitting in your watched folders (top level only, not subfolders). It lists what would move, gives a reason for every file it would leave alone (no rule, rule turned off, no folder set, in use, still downloading and so on), and suggests rules for file types nothing matches. Nothing moves until you press Move. Also in the tray menu.
+- **Updates:** the installed app checks GitHub Releases every few hours, downloads new versions in the background and installs them when it next restarts. Turn this off in Settings, or use **Check for updates** there or in the tray menu. The portable exe doesn't update itself.
 
 ## Safety
 

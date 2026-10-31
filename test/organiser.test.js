@@ -211,3 +211,10 @@ test('isTopLevel: only files straight inside a watched folder are tidied', () =>
   assert.equal(isTopLevel(path.join(docs.toUpperCase(), 'a.pdf'), [docs]), true, 'case does not matter on Windows');
   assert.equal(isTopLevel(path.join(docs, 'a.pdf'), []), false);
 });
+
+test('canUpdate: only the installed app updates itself', () => {
+  const { canUpdate } = require('../lib/updater');
+  assert.equal(canUpdate({ isPackaged: true }, {}), true);
+  assert.equal(canUpdate({ isPackaged: false }, {}), false, 'dev build');
+  assert.equal(canUpdate({ isPackaged: true }, { PORTABLE_EXECUTABLE_DIR: 'C:\\x' }), false, 'portable exe');
+});

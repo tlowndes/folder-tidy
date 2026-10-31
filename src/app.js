@@ -185,9 +185,37 @@ function renderHistory() {
     : '<tr><td colspan="4" class="empty">No moves yet.</td></tr>';
 }
 
+// What the update row says for each updater status.
+const UPDATE_TEXT = {
+  unavailable: 'Updates only work in the installed app.',
+  idle: 'Not checked yet.',
+  checking: 'Checking for updates…',
+  'up-to-date': "You're on the latest version.",
+  downloading: 'Downloading version {v}…',
+  ready: 'Version {v} is ready to install.',
+  error: "Couldn't check for updates. Try again later.",
+};
+
+function renderUpdate() {
+  const { status, version, current } = state.update;
+  $('update-version').textContent = `Folder Tidy ${current}`;
+  $('update-status').textContent = UPDATE_TEXT[status].replace('{v}', version || '');
+  const btn = $('update-btn');
+  btn.textContent = status === 'ready' ? 'Restart and update' : 'Check for updates';
+  btn.disabled = ['unavailable', 'checking', 'downloading'].includes(status);
+}
+
+$('update-btn').addEventListener('click', async () => {
+  if (state.update.status === 'ready') return window.folderTidy.installUpdate();
+  state = await window.folderTidy.checkUpdates();
+  renderUpdate();
+});
+
 function renderSettings() {
   $('s-login').checked = state.settings.startWithWindows;
   $('s-dry').checked = state.settings.dryRun;
+  $('s-update').checked = state.settings.autoUpdate;
+  renderUpdate();
   $('s-delay').value = state.settings.delaySeconds;
   $('s-delay-label').textContent = `${Math.round(state.settings.delaySeconds / 60)} min`;
 
@@ -319,6 +347,7 @@ $('save-settings').addEventListener('click', async () => {
   state = await window.folderTidy.saveSettings({
     startWithWindows: $('s-login').checked,
     dryRun: $('s-dry').checked,
+    autoUpdate: $('s-update').checked,
     delaySeconds: Number($('s-delay').value),
   });
   await refresh();
@@ -480,5 +509,6 @@ window.folderTidy.onStateChanged(async () => {
   state = await window.folderTidy.getState();
   renderHome();
   renderHistory();
+  renderUpdate();
 });
 refresh();
