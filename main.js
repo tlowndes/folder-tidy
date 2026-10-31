@@ -65,6 +65,7 @@ function sendDigestIfDue(now = Date.now()) {
 }
 
 function refreshUi() {
+  rebuildTray();
   if (win && !win.isDestroyed()) win.webContents.send('state-changed');
 }
 
@@ -253,7 +254,12 @@ function createTray() {
   tray = new Tray(icon);
   tray.setToolTip('Folder Tidy');
   const rebuild = rebuildTray = () => {
+    const today = history.movedToday();
+    const summary = today === 0 ? 'Nothing tidied yet today' : `${today} ${today === 1 ? 'file' : 'files'} tidied today`;
+    tray.setToolTip(`Folder Tidy · ${watcher.paused ? 'Paused' : summary}`);
     tray.setContextMenu(Menu.buildFromTemplate([
+      { label: summary, enabled: false },
+      { type: 'separator' },
       { label: 'Open', click: () => { win.show(); win.focus(); } },
       { label: watcher.paused ? 'Resume' : 'Pause', click: () => { watcher.paused ? watcher.resume() : watcher.pause(); rebuild(); refreshUi(); } },
       { label: 'Check now', click: () => showCheck() },
@@ -318,7 +324,7 @@ app.whenReady().then(() => {
   setLoginItem(config.data.settings.startWithWindows);
   updater.start();
   sendDigestIfDue();
-  setInterval(() => sendDigestIfDue(), 60 * 1000);
+  setInterval(() => { sendDigestIfDue(); rebuildTray(); }, 60 * 1000);
   app.on('activate', () => { win.show(); });
 });
 

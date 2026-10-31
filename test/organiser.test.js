@@ -275,3 +275,24 @@ test('findClutter: duplicates, old installers and stalled downloads, top level o
   assert.equal(found[0].kind, 'duplicate', 'duplicates come first');
   assert.ok(fs.existsSync(path.join(dir, 'setup.exe')), 'finding never deletes');
 });
+
+test('destinationFor: optional year or year/month subfolders by file date', () => {
+  const { destinationFor } = require('../lib/rules');
+  const date = new Date(2026, 9, 31);
+  const rule = { destination: path.join('P', 'Pictures') };
+  assert.equal(destinationFor(rule, date), rule.destination);
+  assert.equal(destinationFor({ ...rule, subfolders: 'year' }, date), path.join(rule.destination, '2026'));
+  assert.equal(destinationFor({ ...rule, subfolders: 'month' }, date), path.join(rule.destination, '2026', '10'));
+  assert.equal(destinationFor({ destination: '', subfolders: 'year' }, date), '');
+});
+
+test('History.movedToday: counts moves since midnight that were not undone', () => {
+  const now = new Date(2026, 9, 31, 15).getTime();
+  const h = new History(path.join(tempDir(), 'h.json'), 30, () => now);
+  h.entries = [
+    { id: 'a', time: new Date(2026, 9, 31, 9).toISOString(), undone: false },
+    { id: 'b', time: new Date(2026, 9, 31, 10).toISOString(), undone: true },
+    { id: 'c', time: new Date(2026, 9, 30, 23).toISOString(), undone: false },
+  ];
+  assert.equal(h.movedToday(), 1);
+});
