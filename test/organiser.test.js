@@ -8,7 +8,7 @@ const path = require('path');
 const { DEFAULT_RULES, matchRule } = require('../lib/rules');
 const { uniquePath, moveFile, moveBack } = require('../lib/mover');
 const { History } = require('../lib/history');
-const { isProtectedPath, isPartialDownload } = require('../lib/safety');
+const { isProtectedPath, isPartialDownload, isTopLevel } = require('../lib/safety');
 const { planFile, applyPlan, undoEntry } = require('../lib/organiser');
 
 // Test folders live inside the project, not in the temp folder. The temp folder is under
@@ -201,4 +201,13 @@ test('suggestRules: extends a matching default rule, or groups types into a new 
   assert.equal(design.count, 2);
   assert.ok(suggestions.some((s) => s.kind === 'new' && s.name === 'QQQ files'));
   assert.equal(suggestions.length, 3);
+});
+
+test('isTopLevel: only files straight inside a watched folder are tidied', () => {
+  const docs = path.join(path.sep, 'home', 'tom', 'Documents');
+  assert.equal(isTopLevel(path.join(docs, 'invoice.pdf'), [docs]), true);
+  assert.equal(isTopLevel(path.join(docs, 'Work', 'Client', 'brief.pdf'), [docs]), false);
+  assert.equal(isTopLevel(path.join(docs, 'Sorted', 'old.pdf'), [docs]), false);
+  assert.equal(isTopLevel(path.join(docs.toUpperCase(), 'a.pdf'), [docs]), true, 'case does not matter on Windows');
+  assert.equal(isTopLevel(path.join(docs, 'a.pdf'), []), false);
 });

@@ -1,6 +1,6 @@
 # Folder Tidy
 
-A Windows app that keeps Downloads and Documents tidy. It watches those folders and moves new files to the place you choose, based on rules you set. Every move can be undone.
+A Windows app that keeps Downloads and Documents tidy. It watches those folders and moves new files to the place you choose, based on rules you set. Only files sitting straight in a watched folder are moved; subfolders are always left alone. Every move can be undone.
 
 ## How it works
 
