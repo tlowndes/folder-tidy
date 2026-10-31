@@ -9,6 +9,7 @@ A Windows app that keeps Downloads and Documents tidy. It watches those folders 
 - **Undo:** each move is logged for 30 days. Undo puts the file back where it was.
 - **Dry run:** shows what would move without moving anything.
 - **Check now:** looks at the files already sitting in your watched folders (top level only, not subfolders). It lists what would move, gives a reason for every file it would leave alone (no rule, rule turned off, no folder set, in use, still downloading and so on), and suggests rules for file types nothing matches. Nothing moves until you press Move. Also in the tray menu.
+- **Old clutter:** Check now also lists exact duplicates, installers older than 30 days and downloads that stalled over a week ago, in the watched folders and the Installers folder (top level only). Tick what to bin and it goes to the Recycle Bin, so you can restore it.
 - **Updates:** the installed app checks GitHub Releases every few hours, downloads new versions in the background and installs them when it next restarts. Turn this off in Settings, or use **Check for updates** there or in the tray menu. The portable exe doesn't update itself.
 - **Notifications:** by default you get one daily summary (6pm, changeable) with what moved and how many files need a look, instead of a pop-up per file. If the PC is off at that time, it arrives when Folder Tidy next starts. You can switch to a pop-up for each move, or turn them off.
 

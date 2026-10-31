@@ -10,6 +10,7 @@ const { undoEntry, applyPlan } = require('./lib/organiser');
 const { scanFolders, suggestRules, explainFile } = require('./lib/scan');
 const { Updater } = require('./lib/updater');
 const { NEEDS_LOOK, isDue, buildDigest } = require('./lib/digest');
+const { findClutter } = require('./lib/clutter');
 
 const DATA_DIR = path.join(app.getPath('appData'), 'folder-tidy');
 const DEFAULT_SOURCES = [
@@ -110,13 +111,34 @@ function undoById(id) {
   return result;
 }
 
+// Files the last check offered to bin. Only these can be binned, so the UI can never
+// send anything else to the Recycle Bin.
+let lastClutter = new Set();
+
+// Where clutter is looked for: the watched folders, plus the Installers rule's folder.
+function clutterFolders() {
+  const folders = config.data.sources.filter((s) => s.enabled).map((s) => s.path);
+  const installers = config.data.rules.find((r) => r.id === 'installers' && r.enabled && r.destination);
+  if (installers) folders.push(installers.destination);
+  return folders;
+}
+
 // Looks at every file in the watched folders now, without moving anything.
 function checkNow() {
   const results = scanFolders(config.data.sources, config.data.rules);
+  let clutter = [];
+  try {
+    clutter = findClutter(clutterFolders());
+  } catch (err) {
+    console.error('[folder-tidy] clutter', err);
+  }
+  lastClutter = new Set(clutter.map((c) => c.file));
   return {
     time: new Date().toISOString(),
     dryRun: config.data.settings.dryRun,
-    toMove: results.filter((r) => r.action === 'move'),
+    clutter,
+    // Clutter is offered for the bin instead, so it isn't also offered for a move.
+    toMove: results.filter((r) => r.action === 'move' && !lastClutter.has(r.file)),
     skipped: results.filter((r) => r.action === 'skip'),
     suggestions: suggestRules(results, config.data.rules),
   };
@@ -147,6 +169,32 @@ function moveChecked(files) {
   refreshUi();
   const moved = results.filter((r) => r.ok).length;
   if (moved) notify('Folder Tidy', dryRun ? `Dry run: would move ${moved} files` : `Moved ${moved} files`);
+  return results;
+}
+
+// Sends files from the last check to the Recycle Bin, so they can still be restored.
+async function binFiles(files) {
+  const { dryRun } = config.data.settings;
+  const results = [];
+  for (const file of files) {
+    if (!lastClutter.has(file)) {
+      results.push({ file, ok: false, message: 'Not offered by the last check' });
+      continue;
+    }
+    if (dryRun) {
+      results.push({ file, ok: true, dryRun });
+      continue;
+    }
+    try {
+      await shell.trashItem(file);
+      lastClutter.delete(file);
+      results.push({ file, ok: true });
+    } catch (err) {
+      results.push({ file, ok: false, message: /no such file|ENOENT/i.test(err.message) ? 'No longer there' : 'Open in another app, or read-only' });
+    }
+  }
+  const binned = results.filter((r) => r.ok).length;
+  if (binned) notify('Folder Tidy', dryRun ? `Dry run: would bin ${binned} files` : `Sent ${binned} files to the Recycle Bin`);
   return results;
 }
 
@@ -244,6 +292,7 @@ ipcMain.handle('check-now', () => checkNow());
 ipcMain.handle('check-updates', () => { updater.check(true); return state(); });
 ipcMain.handle('install-update', () => updater.installNow());
 ipcMain.handle('move-checked', (_e, files) => moveChecked(files));
+ipcMain.handle('bin-files', (_e, files) => binFiles(files));
 ipcMain.handle('open-folder', (_e, folder) => shell.openPath(folder));
 ipcMain.handle('pick-folder', async (_e, title) => {
   const result = await dialog.showOpenDialog(win, {

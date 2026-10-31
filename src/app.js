@@ -379,6 +379,15 @@ $('save-settings').addEventListener('click', async () => {
 
 let check = null;          // the last check, from the main process
 let moveResults = null;    // what happened when "Move these" was pressed, by file path
+let binResults = null;     // what happened when "Send to Recycle Bin" was pressed, by file path
+
+const CLUTTER_KINDS = { duplicate: 'Duplicate', installer: 'Old installer', partial: 'Unfinished' };
+
+function formatSize(bytes) {
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+  if (bytes >= 1024 ** 2) return `${Math.round(bytes / 1024 ** 2)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
 
 // Short labels for why a file was left. "fixable" ones can be sorted out with a rule change.
 const REASONS = {
@@ -432,6 +441,29 @@ function renderCheck() {
     : '<li class="empty">Nothing to move right now.</li>';
   updateMoveButton();
 
+  $('clutter-card').hidden = check.clutter.length === 0;
+  const clutterSize = check.clutter.reduce((sum, c) => sum + c.size, 0);
+  $('clutter-title').textContent = `Old clutter (${check.clutter.length}, ${formatSize(clutterSize)})`;
+  $('clutter-list').innerHTML = check.clutter.map((c) => {
+    const done = binResults?.[c.file];
+    const status = !done ? `<span class="kind-tag">${CLUTTER_KINDS[c.kind]}</span>`
+      : done.ok ? `<span class="result-ok">${done.dryRun ? 'Would bin' : 'Binned'}</span>`
+      : `<span class="result-fail">${esc(done.message)}</span>`;
+    return `
+      <li class="row-item">
+        <label class="check-row">
+          <input type="checkbox" class="bin-pick" value="${esc(c.file)}" ${done ? 'disabled' : 'checked'}>
+          <span class="file-badge">${icon('file')}</span>
+          <div class="row-main">
+            <div class="row-title" title="${esc(c.file)}">${esc(baseName(c.file))}</div>
+            <div class="row-sub">${esc(c.message)} · ${formatSize(c.size)}</div>
+          </div>
+        </label>
+        ${status}
+      </li>`;
+  }).join('');
+  updateBinButton();
+
   $('suggest-card').hidden = check.suggestions.length === 0;
   $('suggest-list').innerHTML = check.suggestions.map((s, i) => `
     <li class="row-item">
@@ -473,6 +505,29 @@ function updateMoveButton() {
   $('move-checked').textContent = check?.dryRun ? `Try ${plural(n, 'file')} (dry run)` : `Move ${plural(n, 'file')}`;
 }
 
+function pickedClutter() {
+  return [...document.querySelectorAll('.bin-pick:checked:not(:disabled)')].map((cb) => cb.value);
+}
+
+function updateBinButton() {
+  const picked = pickedClutter();
+  $('bin-checked').disabled = picked.length === 0;
+  $('bin-checked').textContent = picked.length
+    ? `${check.dryRun ? 'Try binning' : 'Bin'} ${plural(picked.length, 'file')}`
+    : 'Send to Recycle Bin';
+}
+
+$('clutter-list').addEventListener('change', updateBinButton);
+
+$('bin-checked').addEventListener('click', async () => {
+  const files = pickedClutter();
+  if (!files.length) return;
+  $('bin-checked').disabled = true;
+  const results = await window.folderTidy.binFiles(files);
+  binResults = { ...(binResults || {}), ...Object.fromEntries(results.map((r) => [r.file, r])) };
+  renderCheck();
+});
+
 async function runCheck() {
   showPage('check');
   $('run-check').disabled = true;
@@ -480,6 +535,7 @@ async function runCheck() {
   try {
     check = await window.folderTidy.checkNow();
     moveResults = null;
+    binResults = null;
     renderCheck();
   } finally {
     $('run-check').disabled = false;

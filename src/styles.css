@@ -302,6 +302,9 @@ td.action { text-align: right; }
 .segmented input:focus-visible + span { outline: 2px solid var(--accent-soft); }
 .time-input { width: auto; }
 .hidden { display: none; }
+#bin-checked { white-space: nowrap; flex-shrink: 0; }
+.card-sub { margin: 4px 0 0; color: var(--muted); font-size: 12.5px; max-width: 520px; }
+.kind-tag { font-size: 12px; font-weight: 600; padding: 3px 8px; border-radius: 6px; background: var(--bg); color: var(--muted); white-space: nowrap; }
 
 .folder-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line); }
 .folder-row:first-child { border-top: none; }

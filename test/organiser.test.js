@@ -240,3 +240,38 @@ test('buildDigest: summarises moves, dry runs and files that need a look', () =>
   });
   assert.equal(buildDigest({ moves: [], dryRunCount: 1, needsLook: 1, rules }).body, 'Dry run: would have moved 1 file. 1 file needs a look.');
 });
+
+test('findClutter: duplicates, old installers and stalled downloads, top level only', () => {
+  const { findClutter } = require('../lib/clutter');
+  const dir = tempDir();
+  const other = tempDir();
+  const write = (p, body, daysOld = 0) => {
+    fs.writeFileSync(p, body);
+    const t = (Date.now() - daysOld * 864e5) / 1000;
+    fs.utimesSync(p, t, t);
+    return p;
+  };
+  write(path.join(dir, 'photo.jpg'), 'same', 5);
+  write(path.join(dir, 'photo (2).jpg'), 'same', 1);
+  write(path.join(other, 'photo copy.jpg'), 'same', 2);
+  write(path.join(dir, 'different.jpg'), 'diff', 1);
+  write(path.join(dir, 'setup.exe'), 'installer-old', 45);
+  write(path.join(dir, 'new-setup.exe'), 'installer-new', 3);
+  write(path.join(dir, 'film.mp4.crdownload'), 'partial', 10);
+  write(path.join(dir, 'fresh.crdownload'), 'partial-new', 1);
+  write(path.join(dir, 'empty-a.txt'), '', 1);
+  write(path.join(dir, 'empty-b.txt'), '', 1);
+  fs.mkdirSync(path.join(dir, 'Mine'));
+  write(path.join(dir, 'Mine', 'photo.jpg'), 'same', 9);
+
+  const found = findClutter([dir, other]);
+  const byName = Object.fromEntries(found.map((c) => [path.basename(c.file), c]));
+  assert.deepEqual(Object.keys(byName).sort(), ['film.mp4.crdownload', 'photo (2).jpg', 'photo copy.jpg', 'setup.exe']);
+  assert.equal(byName['photo (2).jpg'].kind, 'duplicate');
+  assert.equal(byName['photo (2).jpg'].message, 'Same as photo.jpg');
+  assert.match(byName['photo copy.jpg'].message, /^Same as photo\.jpg in /);
+  assert.equal(byName['setup.exe'].kind, 'installer');
+  assert.equal(byName['film.mp4.crdownload'].kind, 'partial');
+  assert.equal(found[0].kind, 'duplicate', 'duplicates come first');
+  assert.ok(fs.existsSync(path.join(dir, 'setup.exe')), 'finding never deletes');
+});
