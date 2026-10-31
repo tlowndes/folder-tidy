@@ -9,6 +9,7 @@ const { Watcher } = require('./lib/watcher');
 const { undoEntry, applyPlan } = require('./lib/organiser');
 const { scanFolders, suggestRules, explainFile } = require('./lib/scan');
 const { Updater } = require('./lib/updater');
+const { NEEDS_LOOK, isDue, buildDigest } = require('./lib/digest');
 
 const DATA_DIR = path.join(app.getPath('appData'), 'folder-tidy');
 const DEFAULT_SOURCES = [
@@ -26,8 +27,33 @@ let win = null;
 let tray = null;
 let rebuildTray = () => {};
 
-function notify(title, body) {
-  if (Notification.isSupported()) new Notification({ title, body }).show();
+function notify(title, body, onClick) {
+  if (!Notification.isSupported()) return;
+  const n = new Notification({ title, body });
+  if (onClick) n.on('click', onClick);
+  n.show();
+}
+
+// Dry-run moves aren't in the history, so the digest counts them here.
+let dryRunCount = 0;
+
+// Sends the daily summary once its time has passed. Checked every minute.
+function sendDigestIfDue(now = Date.now()) {
+  const { notifications, digestTime, digestLastSent } = config.data.settings;
+  if (notifications !== 'daily' || !isDue(now, digestTime, digestLastSent)) return;
+  const since = digestLastSent ? new Date(digestLastSent).getTime() : now - 24 * 60 * 60 * 1000;
+  const moves = history.entries.filter((e) => new Date(e.time).getTime() > since);
+  let needsLook = 0;
+  try {
+    needsLook = scanFolders(config.data.sources, config.data.rules).filter((r) => NEEDS_LOOK.includes(r.reason)).length;
+  } catch (err) {
+    console.error('[folder-tidy] digest scan', err);
+  }
+  const digest = buildDigest({ moves, dryRunCount, needsLook, rules: config.data.rules });
+  if (digest) notify(digest.title, digest.body, () => (needsLook ? showCheck() : showPage('history')));
+  dryRunCount = 0;
+  config.data.settings.digestLastSent = new Date(now).toISOString();
+  config.save();
 }
 
 function refreshUi() {
@@ -40,6 +66,11 @@ const watcher = new Watcher({
   history,
   onMove: (result) => {
     refreshUi();
+    const mode = config.data.settings.notifications;
+    if (mode !== 'each') {
+      if (result.dryRun) dryRunCount += 1;
+      return;
+    }
     if (result.dryRun) {
       notify('Folder Tidy (dry run)', `Would move ${path.basename(result.from)} to ${result.destDir}`);
     } else {
@@ -123,6 +154,12 @@ function showCheck() {
   win.show();
   win.focus();
   win.webContents.send('run-check');
+}
+
+function showPage(page) {
+  win.show();
+  win.focus();
+  win.webContents.send('show-page', page);
 }
 
 function setLoginItem(enabled) {
@@ -222,6 +259,8 @@ app.whenReady().then(() => {
   startWatching();
   setLoginItem(config.data.settings.startWithWindows);
   updater.start();
+  sendDigestIfDue();
+  setInterval(() => sendDigestIfDue(), 60 * 1000);
   app.on('activate', () => { win.show(); });
 });
 

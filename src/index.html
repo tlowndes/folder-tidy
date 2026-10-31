@@ -176,6 +176,22 @@
       </div>
 
       <div class="card">
+        <div class="card-head"><h2>Notifications</h2></div>
+        <div class="setting">
+          <span><strong>Tell me about moves</strong><small id="notify-help"></small></span>
+          <div class="segmented" role="radiogroup" aria-label="Notifications">
+            <label><input type="radio" name="s-notify" value="each"><span>Each move</span></label>
+            <label><input type="radio" name="s-notify" value="daily"><span>Daily summary</span></label>
+            <label><input type="radio" name="s-notify" value="off"><span>Off</span></label>
+          </div>
+        </div>
+        <label id="digest-time-row" class="setting">
+          <span><strong>Summary time</strong><small>If your PC is off then, it arrives when Folder Tidy next starts.</small></span>
+          <input id="s-digest-time" type="time" class="input time-input">
+        </label>
+      </div>
+
+      <div class="card">
         <div class="card-head"><h2>Timing</h2></div>
         <div class="setting column">
           <span><strong>Wait before moving</strong><small>Gives you time to open a file after it downloads.</small></span>

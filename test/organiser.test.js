@@ -218,3 +218,25 @@ test('canUpdate: only the installed app updates itself', () => {
   assert.equal(canUpdate({ isPackaged: false }, {}), false, 'dev build');
   assert.equal(canUpdate({ isPackaged: true }, { PORTABLE_EXECUTABLE_DIR: 'C:\\x' }), false, 'portable exe');
 });
+
+test('digest isDue: once a day after the set time, catching up if the PC was off', () => {
+  const { isDue } = require('../lib/digest');
+  const at = (d, h, m = 0) => new Date(2026, 9, d, h, m).getTime();
+  assert.equal(isDue(at(31, 17, 59), '18:00', null), false, 'before the time');
+  assert.equal(isDue(at(31, 18, 0), '18:00', null), true);
+  assert.equal(isDue(at(31, 21), '18:00', new Date(at(31, 18, 1)).toISOString()), false, 'already sent today');
+  assert.equal(isDue(at(31, 9), '18:00', new Date(at(29, 18)).toISOString()), false, 'not yet today');
+  assert.equal(isDue(at(31, 19), '18:00', new Date(at(29, 18)).toISOString()), true, 'catches up after a day off');
+});
+
+test('buildDigest: summarises moves, dry runs and files that need a look', () => {
+  const { buildDigest } = require('../lib/digest');
+  const rules = [{ id: 'images', name: 'Images' }, { id: 'documents', name: 'Documents' }];
+  const moves = [{ ruleId: 'images' }, { ruleId: 'images' }, { ruleId: 'documents' }, { ruleId: 'images', undone: true }];
+  assert.equal(buildDigest({ moves: [], rules }), null, 'nothing to say');
+  assert.deepEqual(buildDigest({ moves, needsLook: 2, rules }), {
+    title: 'Your tidy-up today',
+    body: 'Moved 3 files (Images 2, Documents 1). 2 files need a look.',
+  });
+  assert.equal(buildDigest({ moves: [], dryRunCount: 1, needsLook: 1, rules }).body, 'Dry run: would have moved 1 file. 1 file needs a look.');
+});

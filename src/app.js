@@ -211,10 +211,30 @@ $('update-btn').addEventListener('click', async () => {
   renderUpdate();
 });
 
+const NOTIFY_HELP = {
+  each: 'A pop-up every time a file moves.',
+  daily: 'One pop-up a day with what moved and anything that needs a look.',
+  off: 'No pop-ups. Everything is still in History.',
+};
+
+function notifyMode() {
+  return document.querySelector('[name="s-notify"]:checked')?.value || 'daily';
+}
+
+function renderNotifyHelp() {
+  $('notify-help').textContent = NOTIFY_HELP[notifyMode()];
+  $('digest-time-row').classList.toggle('hidden', notifyMode() !== 'daily');
+}
+
+document.querySelectorAll('[name="s-notify"]').forEach((r) => r.addEventListener('change', renderNotifyHelp));
+
 function renderSettings() {
   $('s-login').checked = state.settings.startWithWindows;
   $('s-dry').checked = state.settings.dryRun;
   $('s-update').checked = state.settings.autoUpdate;
+  document.querySelectorAll('[name="s-notify"]').forEach((r) => { r.checked = r.value === state.settings.notifications; });
+  $('s-digest-time').value = state.settings.digestTime;
+  renderNotifyHelp();
   renderUpdate();
   $('s-delay').value = state.settings.delaySeconds;
   $('s-delay-label').textContent = `${Math.round(state.settings.delaySeconds / 60)} min`;
@@ -348,6 +368,8 @@ $('save-settings').addEventListener('click', async () => {
     startWithWindows: $('s-login').checked,
     dryRun: $('s-dry').checked,
     autoUpdate: $('s-update').checked,
+    notifications: notifyMode(),
+    digestTime: $('s-digest-time').value || '18:00',
     delaySeconds: Number($('s-delay').value),
   });
   await refresh();
@@ -502,6 +524,7 @@ $('suggest-list').addEventListener('click', async (e) => {
 });
 
 window.folderTidy.onRunCheck(runCheck);
+window.folderTidy.onShowPage(showPage);
 
 // A background move only changes home and history. Rule and settings drafts are kept,
 // so unsaved edits are not lost while you are working.

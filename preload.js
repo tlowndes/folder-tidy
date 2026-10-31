@@ -17,5 +17,6 @@ contextBridge.exposeInMainWorld('folderTidy', {
   installUpdate: () => ipcRenderer.invoke('install-update'),
   moveChecked: (files) => ipcRenderer.invoke('move-checked', files),
   onRunCheck: (callback) => ipcRenderer.on('run-check', () => callback()),
+  onShowPage: (callback) => ipcRenderer.on('show-page', (_e, page) => callback(page)),
   onStateChanged: (callback) => ipcRenderer.on('state-changed', () => callback()),
 });
