@@ -126,6 +126,7 @@
         <button id="add-rule" class="btn btn-outline">+ Add rule</button>
       </header>
 
+      <p class="drop-hint">Tip: drag a file from Explorer onto a rule to add its type (then Save rules), or onto "Try a file name" to see where it would go.</p>
       <div id="rules-list" class="stack"></div>
 
       <div class="card test-card">
@@ -222,10 +223,25 @@
       </div>
 
       <footer class="page-foot">
+        <button id="rerun-setup" class="btn btn-light">Run setup again</button>
         <button id="save-settings" class="btn btn-primary">Save settings</button>
       </footer>
     </section>
   </main>
+
+  <!-- FIRST-RUN SETUP -->
+  <div id="setup" class="setup" hidden>
+    <div class="setup-panel" role="dialog" aria-modal="true" aria-labelledby="setup-title">
+      <div class="setup-steps" id="setup-steps"></div>
+      <h1 id="setup-title"></h1>
+      <p id="setup-sub" class="sub"></p>
+      <div id="setup-body" class="setup-body"></div>
+      <footer class="setup-foot">
+        <button id="setup-back" class="btn btn-light">Back</button>
+        <button id="setup-next" class="btn btn-primary">Next</button>
+      </footer>
+    </div>
+  </div>
 
   <script src="app.js"></script>
 </body>

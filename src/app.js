@@ -95,6 +95,15 @@ function renderHome() {
     : '<li class="empty">No moves yet. New downloads will show up here.</li>';
 }
 
+// Shows where a file saved today would land, e.g. "…\Pictures\2026\10".
+function subExample(r) {
+  if (!r.subfolders) return '';
+  const now = new Date();
+  const parts = [baseName(r.destination || '') || 'Folder', String(now.getFullYear())];
+  if (r.subfolders === 'month') parts.push(String(now.getMonth() + 1).padStart(2, '0'));
+  return `e.g. ${parts.join('\\')}`;
+}
+
 function ruleCard(r, i) {
   const noDest = !r.destination;
   return `
@@ -126,6 +135,16 @@ function ruleCard(r, i) {
             <button class="btn btn-outline choose-dest">${icon('folder')}${noDest ? 'Choose folder' : 'Change'}</button>
           </div>
         </div>
+        <div class="field field-full">
+          <span class="field-label">Then sort into</span>
+          <div class="sub-row">
+            <div class="segmented" role="radiogroup" aria-label="Dated subfolders">
+              ${[['', 'Just that folder'], ['year', 'Year'], ['month', 'Year and month']].map(([v, label]) => `
+                <label><input type="radio" class="rule-sub" name="sub-${i}" value="${v}" ${(r.subfolders || '') === v ? 'checked' : ''}><span>${label}</span></label>`).join('')}
+            </div>
+            <span class="sub-example">${esc(subExample(r))}</span>
+          </div>
+        </div>
       </div>
     </div>`;
 }
@@ -148,6 +167,7 @@ function readRulesFromDom() {
       .split(',').map((e) => e.trim().toLowerCase()).filter(Boolean)
       .map((e) => (e.startsWith('.') ? e : `.${e}`));
     r.namePattern = card.querySelector('.rule-pattern').value.trim();
+    r.subfolders = card.querySelector('.rule-sub:checked')?.value || '';
   });
 }
 
@@ -167,7 +187,8 @@ function runTest() {
     out.textContent = `Matches "${hit.name}", but no folder is chosen yet.`;
   } else {
     out.classList.add('hit');
-    out.textContent = `Would move to ${hit.destination} (rule: ${hit.name})`;
+    const sub = hit.subfolders ? ` ${subExample(hit).replace('e.g. ', '(into ')})` : '';
+    out.textContent = `Would move to ${hit.destination}${sub} (rule: ${hit.name})`;
   }
 }
 
@@ -267,7 +288,118 @@ async function refresh() {
   rulesDraft = null;
   sourcesDraft = null;
   renderAll();
+  if (!state.settings.setupDone && !setup) openSetup();
 }
+
+// ---------- First-run setup ----------
+
+// Three steps: folders to watch, where things go, then a safe start. Nothing is saved
+// until Finish, and it ends on a Check so you see what would happen straight away.
+let setup = null;
+
+const SETUP_STEPS = [
+  { title: 'Which folders should I keep tidy?', sub: 'New files that land here get sorted. Subfolders are always left alone.' },
+  { title: 'Where should things go?', sub: 'Pick a folder for each type, or turn off the ones you don\'t need. You can change these later in Rules.' },
+  { title: 'Start safely', sub: 'Nothing is ever deleted, and every move can be undone.' },
+];
+
+function openSetup() {
+  setup = {
+    step: 0,
+    sources: structuredClone(state.sources),
+    rules: structuredClone(state.rules),
+    dryRun: true,
+    startWithWindows: true,
+  };
+  $('setup').hidden = false;
+  renderSetup();
+}
+
+function setupRow(iconName, title, sub, control) {
+  return `
+    <li class="row-item">
+      <span class="file-badge">${icon(iconName)}</span>
+      <div class="row-main">
+        <div class="row-title">${esc(title)}</div>
+        <div class="row-sub" title="${esc(sub)}">${esc(sub)}</div>
+      </div>
+      ${control}
+    </li>`;
+}
+
+function renderSetup() {
+  const { step } = setup;
+  $('setup-steps').innerHTML = SETUP_STEPS.map((_, i) => `<span class="${i <= step ? 'on' : ''}"></span>`).join('');
+  $('setup-title').textContent = SETUP_STEPS[step].title;
+  $('setup-sub').textContent = SETUP_STEPS[step].sub;
+  $('setup-back').classList.toggle('invisible', step === 0);
+  $('setup-next').textContent = step === SETUP_STEPS.length - 1 ? 'Finish and check my folders' : 'Next';
+
+  if (step === 0) {
+    $('setup-body').innerHTML = `<ul class="rows">${setup.sources.map((s, i) => setupRow('folder', baseName(s.path), s.path,
+      `<input type="checkbox" class="switch setup-src" data-i="${i}" ${s.enabled ? 'checked' : ''} aria-label="Watch ${esc(baseName(s.path))}">`)).join('')}</ul>
+      <button id="setup-add-src" class="btn btn-outline">${icon('plus')}Add folder</button>`;
+  } else if (step === 1) {
+    $('setup-body').innerHTML = `<ul class="rows">${setup.rules.map((r, i) => `
+      <li class="row-item setup-rule">
+        <input type="checkbox" class="switch setup-rule-on" data-i="${i}" ${r.enabled ? 'checked' : ''} aria-label="Use ${esc(r.name)}">
+        <div class="row-main">
+          <div class="row-title">${esc(r.name)} <span class="muted">${esc(r.extensions.slice(0, 4).join(' '))}${r.extensions.length > 4 ? ' …' : ''}</span></div>
+          <div class="row-sub" title="${esc(r.destination)}">${r.destination ? esc(r.destination) : 'No folder yet'}</div>
+        </div>
+        <button class="btn btn-light setup-dest" data-i="${i}">${r.destination ? 'Change' : 'Choose'}</button>
+      </li>`).join('')}</ul>`;
+  } else {
+    $('setup-body').innerHTML = `
+      <label class="choice"><input type="radio" name="setup-mode" value="dry" ${setup.dryRun ? 'checked' : ''}>
+        <span><strong>Dry run first</strong> (recommended)<small>For now it only shows what it would move. Turn it off in Settings when you're happy.</small></span></label>
+      <label class="choice"><input type="radio" name="setup-mode" value="live" ${setup.dryRun ? '' : 'checked'}>
+        <span><strong>Start tidying now</strong><small>New files move a few minutes after they arrive.</small></span></label>
+      <label class="setting"><span><strong>Start with Windows</strong><small>Runs quietly in the tray when you sign in.</small></span>
+        <input type="checkbox" class="switch" id="setup-login" ${setup.startWithWindows ? 'checked' : ''}></label>`;
+  }
+}
+
+$('setup-body').addEventListener('change', (e) => {
+  const t = e.target;
+  if (t.classList.contains('setup-src')) setup.sources[Number(t.dataset.i)].enabled = t.checked;
+  if (t.classList.contains('setup-rule-on')) setup.rules[Number(t.dataset.i)].enabled = t.checked;
+  if (t.name === 'setup-mode') setup.dryRun = t.value === 'dry';
+  if (t.id === 'setup-login') setup.startWithWindows = t.checked;
+});
+
+$('setup-body').addEventListener('click', async (e) => {
+  if (e.target.closest('#setup-add-src')) {
+    const folder = await window.folderTidy.pickFolder('Choose a folder to keep tidy');
+    if (folder && !setup.sources.some((s) => s.path.toLowerCase() === folder.toLowerCase())) {
+      setup.sources.push({ path: folder, enabled: true });
+    }
+    renderSetup();
+  }
+  const dest = e.target.closest('.setup-dest');
+  if (dest) {
+    const r = setup.rules[Number(dest.dataset.i)];
+    const folder = await window.folderTidy.pickFolder(`Choose where "${r.name}" go`);
+    if (folder) { r.destination = folder; r.enabled = true; }
+    renderSetup();
+  }
+});
+
+$('rerun-setup').addEventListener('click', openSetup);
+
+$('setup-back').addEventListener('click', () => { setup.step -= 1; renderSetup(); });
+
+$('setup-next').addEventListener('click', async () => {
+  if (setup.step < SETUP_STEPS.length - 1) { setup.step += 1; renderSetup(); return; }
+  $('setup-next').disabled = true;
+  await window.folderTidy.saveSources(setup.sources);
+  await window.folderTidy.saveRules(setup.rules);
+  await window.folderTidy.saveSettings({ dryRun: setup.dryRun, startWithWindows: setup.startWithWindows, setupDone: true });
+  $('setup').hidden = true;
+  $('setup-next').disabled = false;
+  await refresh();
+  await runCheck();
+});
 
 // ---------- Home ----------
 
@@ -310,8 +442,53 @@ $('rules-list').addEventListener('click', async (e) => {
   renderRules();
 });
 
-$('rules-list').addEventListener('input', () => {
+$('rules-list').addEventListener('input', (e) => {
   readRulesFromDom();
+  if (e.target.classList.contains('rule-sub')) {
+    const card = e.target.closest('.rule');
+    card.querySelector('.sub-example').textContent = subExample(rulesDraft[Number(card.dataset.index)]);
+  }
+  runTest();
+});
+
+// ---------- Drag a file onto a rule ----------
+
+// Dropping a file on a rule adds its type to that rule (unsaved until "Save rules").
+// Dropping it on "Try a file name" fills in the name. Either way the test shows where it goes.
+function droppedName(e) {
+  const file = e.dataTransfer?.files?.[0];
+  if (!file) return null;
+  return baseName(window.folderTidy.pathForFile(file) || file.name);
+}
+
+function dropTarget(e) {
+  return e.target.closest?.('#rules .rule, #rules .test-card');
+}
+
+document.addEventListener('dragover', (e) => {
+  e.preventDefault(); // Stops Electron opening the file in the window.
+  document.querySelectorAll('.drop-over').forEach((el) => el.classList.remove('drop-over'));
+  dropTarget(e)?.classList.add('drop-over');
+});
+document.addEventListener('dragleave', (e) => {
+  if (!e.relatedTarget) document.querySelectorAll('.drop-over').forEach((el) => el.classList.remove('drop-over'));
+});
+document.addEventListener('drop', (e) => {
+  e.preventDefault();
+  document.querySelectorAll('.drop-over').forEach((el) => el.classList.remove('drop-over'));
+  const target = dropTarget(e);
+  const name = droppedName(e);
+  if (!target || !name) return;
+
+  if (target.classList.contains('rule')) {
+    readRulesFromDom();
+    const i = Number(target.dataset.index);
+    const ext = name.includes('.') ? name.slice(name.lastIndexOf('.')).toLowerCase() : '';
+    if (ext && !rulesDraft[i].extensions.includes(ext)) rulesDraft[i].extensions.push(ext);
+    renderRules();
+    document.querySelector(`.rule[data-index="${i}"]`)?.classList.add('just-added');
+  }
+  $('test-name').value = name;
   runTest();
 });
 
@@ -401,6 +578,7 @@ const REASONS = {
   'too-new': { label: 'Just changed' },
   locked: { label: 'In use' },
   protected: { label: 'Protected' },
+  ignored: { label: 'Ignored' },
   unreadable: { label: 'Unreadable' },
 };
 
@@ -435,7 +613,7 @@ function renderCheck() {
                 <div class="row-sub">${esc(r.message)}</div>
               </div>
             </label>
-            ${status}
+            ${done ? status : ignoreBtn(r.file)}
           </li>`;
       }).join('')
     : '<li class="empty">Nothing to move right now.</li>';
@@ -459,6 +637,7 @@ function renderCheck() {
             <div class="row-sub">${esc(c.message)} · ${formatSize(c.size)}</div>
           </div>
         </label>
+        ${done ? '' : ignoreBtn(c.file)}
         ${status}
       </li>`;
   }).join('');
@@ -489,11 +668,27 @@ function renderCheck() {
               <div class="row-title" title="${esc(r.file)}">${esc(baseName(r.file))}</div>
               <div class="row-sub">${esc(r.message)}</div>
             </div>
-            <span class="reason ${reason.fixable ? 'fixable' : ''}">${esc(reason.label)}</span>
+            ${r.reason === 'ignored'
+              ? `<button class="btn btn-ghost small" data-unignore="${esc(r.file)}">Stop ignoring</button>`
+              : `<span class="reason ${reason.fixable ? 'fixable' : ''}">${esc(reason.label)}</span>`}
           </li>`;
       }).join('')
     : '<li class="empty">Every file has somewhere to go.</li>';
 }
+
+function ignoreBtn(file) {
+  return `<button class="btn btn-ghost small" data-ignore="${esc(file)}" title="Never move or bin this file">Leave alone</button>`;
+}
+
+// "Leave alone" and "Stop ignoring" work from any list on the Check page.
+$('check-results').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-ignore], [data-unignore]');
+  if (!btn) return;
+  btn.disabled = true;
+  const ignore = btn.hasAttribute('data-ignore');
+  check = await window.folderTidy.setIgnored(ignore ? btn.dataset.ignore : btn.dataset.unignore, ignore);
+  renderCheck();
+});
 
 function pickedFiles() {
   return [...document.querySelectorAll('.move-pick:checked:not(:disabled)')].map((cb) => cb.value);

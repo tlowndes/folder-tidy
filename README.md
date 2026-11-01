@@ -10,6 +10,11 @@ A Windows app that keeps Downloads and Documents tidy. It watches those folders 
 - **Dry run:** shows what would move without moving anything.
 - **Check now:** looks at the files already sitting in your watched folders (top level only, not subfolders). It lists what would move, gives a reason for every file it would leave alone (no rule, rule turned off, no folder set, in use, still downloading and so on), and suggests rules for file types nothing matches. Nothing moves until you press Move. Also in the tray menu.
 - **Old clutter:** Check now also lists exact duplicates, installers older than 30 days and downloads that stalled over a week ago, in the watched folders and the Installers folder (top level only). Tick what to bin and it goes to the Recycle Bin, so you can restore it.
+- **Leave alone:** any file in Check can be marked "Leave alone", so it is never moved or offered for the bin. "Stop ignoring" undoes it.
+- **Dated subfolders:** a rule can also sort into year or year-and-month subfolders (e.g. `Pictures\2026\10`), based on the file's date.
+- **Drag and drop:** drag a file from Explorer onto a rule to add its type, or onto "Try a file name" to see where it would go.
+- **Tray:** shows how many files were tidied today.
+- **First-run setup:** new installs get a three-step welcome (folders, destinations, dry run or live) that ends with a Check. Run it again from Settings.
 - **Updates:** the installed app checks GitHub Releases every few hours, downloads new versions in the background and installs them when it next restarts. Turn this off in Settings, or use **Check for updates** there or in the tray menu. The portable exe doesn't update itself.
 - **Notifications:** by default you get one daily summary (6pm, changeable) with what moved and how many files need a look, instead of a pop-up per file. If the PC is off at that time, it arrives when Folder Tidy next starts. You can switch to a pop-up for each move, or turn them off.
 

@@ -1,6 +1,6 @@
 'use strict';
 
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 // The only way the UI talks to the main process.
 contextBridge.exposeInMainWorld('folderTidy', {
@@ -13,10 +13,13 @@ contextBridge.exposeInMainWorld('folderTidy', {
   openFolder: (folder) => ipcRenderer.invoke('open-folder', folder),
   pickFolder: (title) => ipcRenderer.invoke('pick-folder', title),
   checkNow: () => ipcRenderer.invoke('check-now'),
+  // The full path of a file dropped onto the window.
+  pathForFile: (file) => webUtils.getPathForFile(file),
   checkUpdates: () => ipcRenderer.invoke('check-updates'),
   installUpdate: () => ipcRenderer.invoke('install-update'),
   moveChecked: (files) => ipcRenderer.invoke('move-checked', files),
   binFiles: (files) => ipcRenderer.invoke('bin-files', files),
+  setIgnored: (file, ignore) => ipcRenderer.invoke('set-ignored', file, ignore),
   onRunCheck: (callback) => ipcRenderer.on('run-check', () => callback()),
   onShowPage: (callback) => ipcRenderer.on('show-page', (_e, page) => callback(page)),
   onStateChanged: (callback) => ipcRenderer.on('state-changed', () => callback()),

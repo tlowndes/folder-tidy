@@ -8,7 +8,7 @@ const path = require('path');
 const { DEFAULT_RULES, matchRule } = require('../lib/rules');
 const { uniquePath, moveFile, moveBack } = require('../lib/mover');
 const { History } = require('../lib/history');
-const { isProtectedPath, isPartialDownload, isTopLevel } = require('../lib/safety');
+const { isProtectedPath, isPartialDownload, isTopLevel, isIgnored } = require('../lib/safety');
 const { planFile, applyPlan, undoEntry } = require('../lib/organiser');
 
 // Test folders live inside the project, not in the temp folder. The temp folder is under
@@ -74,17 +74,22 @@ test('History: add, undoable, markUndone, and days-based cleanup', () => {
   assert.equal(history.entries.length, 1, 'entries older than 30 days are dropped');
 });
 
+// Windows paths are checked with Windows path rules, so these pass on any system.
+const WIN = { pathApi: path.win32, home: 'C:\\Users\\tom' };
+
 test('isProtectedPath: "@" and "." folders and system locations are protected', () => {
-  assert.equal(isProtectedPath('C:\\Users\\tom\\Documents\\@archives\\x.pdf'), true);
-  assert.equal(isProtectedPath('C:\\Users\\tom\\Documents\\.git\\x.txt'), true);
-  assert.equal(isProtectedPath('C:\\Windows\\System32\\x.dll'), true);
-  assert.equal(isProtectedPath('C:\\Users\\tom\\Documents\\Invoices\\x.pdf'), false);
+  assert.equal(isProtectedPath('C:\\Users\\tom\\Documents\\@archives\\x.pdf', WIN), true);
+  assert.equal(isProtectedPath('C:\\Users\\tom\\Documents\\.git\\x.txt', WIN), true);
+  assert.equal(isProtectedPath('C:\\Windows\\System32\\x.dll', WIN), true);
+  assert.equal(isProtectedPath('C:\\Users\\tom\\AppData\\Local\\x.tmp', WIN), true);
+  assert.equal(isProtectedPath('C:\\Users\\tom\\OneDrive\\x.pdf', WIN), true);
+  assert.equal(isProtectedPath('C:\\Users\\tom\\Documents\\Invoices\\x.pdf', WIN), false);
 });
 
 test('isProtectedPath: Windows junctions inside Documents (My Music etc.) are protected', () => {
-  assert.equal(isProtectedPath('C:\\Users\\tom\\Documents\\My Music'), true);
-  assert.equal(isProtectedPath('C:\\Users\\tom\\Documents\\my pictures\\x.jpg'), true);
-  assert.equal(isProtectedPath('C:\\Users\\tom\\Documents\\My Videos'), true);
+  assert.equal(isProtectedPath('C:\\Users\\tom\\Documents\\My Music', WIN), true);
+  assert.equal(isProtectedPath('C:\\Users\\tom\\Documents\\my pictures\\x.jpg', WIN), true);
+  assert.equal(isProtectedPath('C:\\Users\\tom\\Documents\\My Videos', WIN), true);
 });
 
 test('isPartialDownload: browser partial files are skipped', () => {
@@ -274,4 +279,41 @@ test('findClutter: duplicates, old installers and stalled downloads, top level o
   assert.equal(byName['film.mp4.crdownload'].kind, 'partial');
   assert.equal(found[0].kind, 'duplicate', 'duplicates come first');
   assert.ok(fs.existsSync(path.join(dir, 'setup.exe')), 'finding never deletes');
+});
+
+test('destinationFor: optional year or year/month subfolders by file date', () => {
+  const { destinationFor } = require('../lib/rules');
+  const date = new Date(2026, 9, 31);
+  const rule = { destination: path.join('P', 'Pictures') };
+  assert.equal(destinationFor(rule, date), rule.destination);
+  assert.equal(destinationFor({ ...rule, subfolders: 'year' }, date), path.join(rule.destination, '2026'));
+  assert.equal(destinationFor({ ...rule, subfolders: 'month' }, date), path.join(rule.destination, '2026', '10'));
+  assert.equal(destinationFor({ destination: '', subfolders: 'year' }, date), '');
+});
+
+test('History.movedToday: counts moves since midnight that were not undone', () => {
+  const now = new Date(2026, 9, 31, 15).getTime();
+  const h = new History(path.join(tempDir(), 'h.json'), 30, () => now);
+  h.entries = [
+    { id: 'a', time: new Date(2026, 9, 31, 9).toISOString(), undone: false },
+    { id: 'b', time: new Date(2026, 9, 31, 10).toISOString(), undone: true },
+    { id: 'c', time: new Date(2026, 9, 30, 23).toISOString(), undone: false },
+  ];
+  assert.equal(h.movedToday(), 1);
+});
+
+test('ignored files are never planned, explained as ignored, and left out of clutter', () => {
+  const { explainFile } = require('../lib/scan');
+  const { findClutter } = require('../lib/clutter');
+  const dir = tempDir();
+  const file = path.join(dir, 'keep-me.pdf');
+  fs.writeFileSync(file, 'x');
+  fs.writeFileSync(path.join(dir, 'keep-me (2).pdf'), 'x');
+  const rules = [{ id: 'docs', name: 'Docs', enabled: true, extensions: ['.pdf'], namePattern: '', destination: path.join(tempDir(), 'D') }];
+  const ignored = [file.toUpperCase() === file ? file : file.replace('keep-me', 'KEEP-ME')];
+
+  assert.equal(isIgnored(file, ignored), true, 'case does not matter');
+  assert.equal(planFile(file, rules, ignored), null);
+  assert.equal(explainFile(file, rules, { ignored }).reason, 'ignored');
+  assert.deepEqual(findClutter([dir], { ignored: [path.join(dir, 'keep-me (2).pdf')] }), [], 'an ignored copy is not offered');
 });

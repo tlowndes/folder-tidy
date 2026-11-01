@@ -1,6 +1,7 @@
 'use strict';
 
 const { app, BrowserWindow, Tray, Menu, ipcMain, Notification, nativeImage, shell, dialog } = require('electron');
+const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { Config } = require('./lib/config');
@@ -53,7 +54,7 @@ function sendDigestIfDue(now = Date.now()) {
   const moves = history.entries.filter((e) => new Date(e.time).getTime() > since);
   let needsLook = 0;
   try {
-    needsLook = scanFolders(config.data.sources, config.data.rules).filter((r) => NEEDS_LOOK.includes(r.reason)).length;
+    needsLook = scanFolders(config.data.sources, config.data.rules, { ignored: config.data.ignored }).filter((r) => NEEDS_LOOK.includes(r.reason)).length;
   } catch (err) {
     console.error('[folder-tidy] digest scan', err);
   }
@@ -65,12 +66,14 @@ function sendDigestIfDue(now = Date.now()) {
 }
 
 function refreshUi() {
+  rebuildTray();
   if (win && !win.isDestroyed()) win.webContents.send('state-changed');
 }
 
 const watcher = new Watcher({
   getRules: () => config.data.rules,
   getSettings: () => config.data.settings,
+  getIgnored: () => config.data.ignored,
   history,
   onMove: (result) => {
     refreshUi();
@@ -132,10 +135,12 @@ function clutterFolders() {
 
 // Looks at every file in the watched folders now, without moving anything.
 function checkNow() {
-  const results = scanFolders(config.data.sources, config.data.rules);
+  // Forget ignored files that are gone, so the list doesn't grow for ever.
+  config.data.ignored = config.data.ignored.filter((p) => fs.existsSync(p));
+  const results = scanFolders(config.data.sources, config.data.rules, { ignored: config.data.ignored });
   let clutter = [];
   try {
-    clutter = findClutter(clutterFolders());
+    clutter = findClutter(clutterFolders(), { ignored: config.data.ignored });
   } catch (err) {
     console.error('[folder-tidy] clutter', err);
   }
@@ -162,7 +167,7 @@ function moveChecked(files) {
       return { file, ok: false, message: 'Not in a watched folder' };
     }
     try {
-      const plan = explainFile(file, config.data.rules);
+      const plan = explainFile(file, config.data.rules, { ignored: config.data.ignored });
       if (plan.action !== 'move') return { file, ok: false, message: plan.message };
       const done = applyPlan({ from: file, destDir: plan.destDir, ruleId: plan.ruleId }, { dryRun, history });
       return { file, ok: true, to: done.to, dryRun };
@@ -253,7 +258,12 @@ function createTray() {
   tray = new Tray(icon);
   tray.setToolTip('Folder Tidy');
   const rebuild = rebuildTray = () => {
+    const today = history.movedToday();
+    const summary = today === 0 ? 'Nothing tidied yet today' : `${today} ${today === 1 ? 'file' : 'files'} tidied today`;
+    tray.setToolTip(`Folder Tidy · ${watcher.paused ? 'Paused' : summary}`);
     tray.setContextMenu(Menu.buildFromTemplate([
+      { label: summary, enabled: false },
+      { type: 'separator' },
       { label: 'Open', click: () => { win.show(); win.focus(); } },
       { label: watcher.paused ? 'Resume' : 'Pause', click: () => { watcher.paused ? watcher.resume() : watcher.pause(); rebuild(); refreshUi(); } },
       { label: 'Check now', click: () => showCheck() },
@@ -302,6 +312,13 @@ ipcMain.handle('check-updates', () => { updater.check(true); return state(); });
 ipcMain.handle('install-update', () => updater.installNow());
 ipcMain.handle('move-checked', (_e, files) => moveChecked(files));
 ipcMain.handle('bin-files', (_e, files) => binFiles(files));
+// Leave a file alone from now on (or stop ignoring it), then check again.
+ipcMain.handle('set-ignored', (_e, file, ignore) => {
+  const others = config.data.ignored.filter((p) => path.resolve(p).toLowerCase() !== path.resolve(file).toLowerCase());
+  config.data.ignored = ignore ? [...others, file] : others;
+  config.save();
+  return checkNow();
+});
 ipcMain.handle('open-folder', (_e, folder) => shell.openPath(folder));
 ipcMain.handle('pick-folder', async (_e, title) => {
   const result = await dialog.showOpenDialog(win, {
@@ -318,7 +335,7 @@ app.whenReady().then(() => {
   setLoginItem(config.data.settings.startWithWindows);
   updater.start();
   sendDigestIfDue();
-  setInterval(() => sendDigestIfDue(), 60 * 1000);
+  setInterval(() => { sendDigestIfDue(); rebuildTray(); }, 60 * 1000);
   app.on('activate', () => { win.show(); });
 });
 
