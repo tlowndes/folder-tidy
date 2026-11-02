@@ -2,3 +2,4 @@ node_modules/
 dist/
 tmp-tests/
 *.log
+tmp-tests-archive/

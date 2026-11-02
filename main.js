@@ -4,6 +4,7 @@ const { app, BrowserWindow, Tray, Menu, ipcMain, Notification, nativeImage, shel
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const crypto = require('crypto');
 const { Config } = require('./lib/config');
 const { History } = require('./lib/history');
 const { Watcher } = require('./lib/watcher');
@@ -12,6 +13,7 @@ const { scanFolders, suggestRules, explainFile } = require('./lib/scan');
 const { Updater } = require('./lib/updater');
 const { NEEDS_LOOK, isDue, buildDigest } = require('./lib/digest');
 const { findClutter } = require('./lib/clutter');
+const { findIdleProjects, archiveFolder, restoreArchive, formatSize } = require('./lib/archive');
 
 const DATA_DIR = path.join(app.getPath('appData'), 'folder-tidy');
 const DEFAULT_SOURCES = [
@@ -110,6 +112,7 @@ function state() {
     paused: watcher.paused,
     recent: history.entries.slice(0, 50),
     update: { status: updater.status, version: updater.version, current: app.getVersion() },
+    archive: { ...config.data.archive, busy: archiveBusy },
   };
 }
 
@@ -210,6 +213,121 @@ async function binFiles(files) {
   return results;
 }
 
+// ---------- Cold storage ----------
+
+const folderKey = (p) => path.resolve(p).toLowerCase();
+// Folders the last archive check offered. Only these can be archived, so the UI can never
+// zip and bin anything else.
+let lastArchiveOffer = new Set();
+let archiveBusy = false;
+let archiveChecking = false;
+
+async function archiveScan() {
+  const a = config.data.archive;
+  const { projects, missing } = await findIdleProjects(a.parents, { idleDays: a.idleDays, ignored: a.ignored, destination: a.destination });
+  lastArchiveOffer = new Set(projects.filter((p) => p.ready).map((p) => folderKey(p.folder)));
+  return {
+    time: new Date().toISOString(),
+    dryRun: config.data.settings.dryRun,
+    projects,
+    missingParents: missing,
+    destinationMissing: !!a.destination && !fs.existsSync(a.destination),
+  };
+}
+
+// Zips, checks and bins the folders picked from the last archive check, one at a time.
+async function archiveFolders(folders) {
+  if (archiveBusy) return folders.map((folder) => ({ folder, ok: false, message: 'Already archiving, try again in a moment' }));
+  archiveBusy = true;
+  refreshUi();
+  const a = config.data.archive;
+  const { dryRun } = config.data.settings;
+  const results = [];
+  let lastSent = 0;
+  const onProgress = (p) => {
+    const now = Date.now();
+    if (p.stage === 'zipping' && p.done && now - lastSent < 150) return;
+    lastSent = now;
+    if (win && !win.isDestroyed()) win.webContents.send('archive-progress', p);
+  };
+  try {
+    for (const folder of folders) {
+      if (!lastArchiveOffer.has(folderKey(folder))) {
+        results.push({ folder, ok: false, message: 'Not offered by the last check' });
+        continue;
+      }
+      const result = await archiveFolder(folder, {
+        destination: a.destination, idleDays: a.idleDays, dryRun, onProgress, trash: (f) => shell.trashItem(f),
+      });
+      if (result.ok && !result.dryRun) {
+        lastArchiveOffer.delete(folderKey(folder));
+        a.log.unshift({
+          id: crypto.randomUUID(), time: new Date().toISOString(), folder, zip: result.zip,
+          size: result.size, files: result.files, originalRemoved: result.originalRemoved,
+        });
+        a.log = a.log.slice(0, 200);
+        config.save();
+      }
+      results.push(result);
+    }
+  } finally {
+    archiveBusy = false;
+    refreshUi();
+  }
+  const done = results.filter((r) => r.ok);
+  if (done.length) {
+    const size = formatSize(done.reduce((sum, r) => sum + r.size, 0));
+    notify('Folder Tidy', dryRun ? `Dry run: would archive ${done.length} folders (${size})` : `Archived ${done.length} ${done.length === 1 ? 'folder' : 'folders'} (${size})`);
+  }
+  return results;
+}
+
+async function restoreById(id) {
+  const entry = config.data.archive.log.find((e) => e.id === id);
+  if (!entry) return { ok: false, message: 'Not found' };
+  if (!fs.existsSync(entry.zip)) return { ok: false, message: 'Zip not found. Is the archive drive plugged in?' };
+  try {
+    const to = await restoreArchive(entry.zip, entry.folder);
+    entry.restoredTo = to;
+    entry.restoredAt = new Date().toISOString();
+    config.save();
+    refreshUi();
+    return { ok: true, to };
+  } catch (err) {
+    return { ok: false, message: err.code === 'ENOSPC' ? 'Not enough space to restore it' : err.message };
+  }
+}
+
+// Once a day, looks for idle projects and asks before doing anything with them.
+async function archiveCheckIfDue(now = Date.now()) {
+  const a = config.data.archive;
+  if (!a.dailyCheck || !a.parents.length || !a.destination || archiveBusy || archiveChecking) return;
+  if (!isDue(now, a.checkTime, a.lastChecked)) return;
+  archiveChecking = true;
+  try {
+    const scan = await archiveScan();
+    const ready = scan.projects.filter((p) => p.ready);
+    if (ready.length) {
+      const size = formatSize(ready.reduce((sum, p) => sum + p.size, 0));
+      const what = ready.length === 1 ? `"${ready[0].name}" hasn't` : `${ready.length} project folders haven't`;
+      const drive = scan.destinationMissing ? ' Plug in your archive drive first.' : '';
+      notify('Ready for the archive', `${what} changed in ${a.idleDays} days (${size}). Review and archive?${drive}`, () => showArchive());
+    }
+  } catch (err) {
+    console.error('[folder-tidy] archive check', err);
+  } finally {
+    a.lastChecked = new Date(now).toISOString();
+    config.save();
+    archiveChecking = false;
+  }
+}
+
+function showArchive() {
+  win.show();
+  win.focus();
+  win.webContents.send('run-archive-scan');
+}
+
 function showCheck() {
   win.show();
   win.focus();
@@ -267,6 +385,7 @@ function createTray() {
       { label: 'Open', click: () => { win.show(); win.focus(); } },
       { label: watcher.paused ? 'Resume' : 'Pause', click: () => { watcher.paused ? watcher.resume() : watcher.pause(); rebuild(); refreshUi(); } },
       { label: 'Check now', click: () => showCheck() },
+      { label: 'Archive old projects', click: () => showArchive() },
       { label: 'Undo last move', click: () => {
         const last = history.undoable(1)[0];
         if (last) undoById(last.id);
@@ -320,6 +439,25 @@ ipcMain.handle('set-ignored', (_e, file, ignore) => {
   return checkNow();
 });
 ipcMain.handle('open-folder', (_e, folder) => shell.openPath(folder));
+ipcMain.handle('show-item', (_e, file) => shell.showItemInFolder(file));
+ipcMain.handle('save-archive', (_e, patch) => {
+  const allowed = ['parents', 'destination', 'idleDays', 'dailyCheck', 'checkTime'];
+  for (const k of allowed) if (k in patch) config.data.archive[k] = patch[k];
+  config.data.archive.idleDays = Math.max(1, Math.round(Number(config.data.archive.idleDays) || 30));
+  config.save();
+  return state();
+});
+ipcMain.handle('archive-scan', () => archiveScan());
+ipcMain.handle('archive-run', (_e, folders) => archiveFolders(folders));
+ipcMain.handle('archive-restore', (_e, id) => restoreById(id));
+// Leave a project folder alone from now on (or stop), then check again.
+ipcMain.handle('archive-ignore', (_e, folder, ignore) => {
+  const a = config.data.archive;
+  const others = a.ignored.filter((p) => folderKey(p) !== folderKey(folder));
+  a.ignored = ignore ? [...others, folder] : others;
+  config.save();
+  return archiveScan();
+});
 ipcMain.handle('pick-folder', async (_e, title) => {
   const result = await dialog.showOpenDialog(win, {
     title: title || 'Choose a folder',
@@ -335,7 +473,9 @@ app.whenReady().then(() => {
   setLoginItem(config.data.settings.startWithWindows);
   updater.start();
   sendDigestIfDue();
-  setInterval(() => { sendDigestIfDue(); rebuildTray(); }, 60 * 1000);
+  setInterval(() => { sendDigestIfDue(); archiveCheckIfDue(); rebuildTray(); }, 60 * 1000);
+  // A little after start-up, so it doesn't slow the app opening.
+  setTimeout(() => archiveCheckIfDue(), 30 * 1000);
   app.on('activate', () => { win.show(); });
 });
 

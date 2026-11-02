@@ -24,6 +24,7 @@
       <button data-page="check" class="nav-btn"><span data-icon="search"></span>Check</button>
       <button data-page="rules" class="nav-btn"><span data-icon="rules"></span>Rules</button>
       <button data-page="history" class="nav-btn"><span data-icon="history"></span>History</button>
+      <button data-page="archive" class="nav-btn"><span data-icon="archive"></span>Archive</button>
       <button data-page="settings" class="nav-btn"><span data-icon="settings"></span>Settings</button>
     </nav>
 
@@ -155,6 +156,82 @@
           <thead><tr><th>When</th><th>File</th><th>Moved to</th><th></th></tr></thead>
           <tbody id="history-body"></tbody>
         </table>
+      </div>
+    </section>
+
+    <!-- ARCHIVE -->
+    <section id="archive" class="page">
+      <header class="page-head">
+        <div>
+          <h1>Archive</h1>
+          <p class="sub">Zips project folders you haven't touched in a while and moves them to your archive drive. Nothing moves until you say so.</p>
+        </div>
+        <button id="run-archive" class="btn btn-primary">Check for old projects</button>
+      </header>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h2>Project folders</h2>
+            <p class="card-sub">Every folder inside these counts as one project, e.g. Documents\Projects\Logo job.</p>
+          </div>
+        </div>
+        <ul id="archive-parents" class="rows"></ul>
+        <div class="card-foot">
+          <button id="add-parent" class="btn btn-outline">+ Add project folder</button>
+        </div>
+      </div>
+
+      <div class="card archive-settings">
+        <div class="card-head"><h2>How it works</h2></div>
+        <div class="setting">
+          <span><strong>Archive to</strong><small id="archive-dest"></small></span>
+          <button id="choose-archive-dest" class="btn btn-light">Choose folder</button>
+        </div>
+        <label class="setting">
+          <span><strong>Idle after</strong><small>Days with nothing changed anywhere inside a project.</small></span>
+          <span class="days-field"><input id="a-days" type="number" min="1" max="3650" class="input num-input"> days</span>
+        </label>
+        <label class="setting">
+          <span><strong>Check every day</strong><small>Sends a notification when a project is ready. Nothing moves until you approve it here.</small></span>
+          <input id="a-daily" type="checkbox" class="switch">
+        </label>
+        <label id="a-time-row" class="setting">
+          <span><strong>Check time</strong><small>If your PC is off then, it checks when Folder Tidy next starts.</small></span>
+          <input id="a-time" type="time" class="input time-input">
+        </label>
+      </div>
+
+      <div id="archive-empty" class="card empty">Press Check for old projects to see what's ready. Each one is zipped, checked file by file, and only then sent to the Recycle Bin.</div>
+
+      <div id="archive-results" hidden>
+        <p id="archive-meta" class="check-meta"></p>
+        <div id="archive-warning" class="card warn" hidden></div>
+
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h2 id="archive-ready-title">Ready to archive</h2>
+              <p class="card-sub">Zipped into your archive folder, read back and checked against the original, then the original goes to the Recycle Bin. Empty the bin to free the space.</p>
+            </div>
+            <button id="archive-checked" class="btn btn-primary">Archive</button>
+          </div>
+          <div id="archive-progress" class="progress-row" hidden>
+            <span id="archive-progress-label"></span>
+            <progress id="archive-progress-bar" max="1" value="0"></progress>
+          </div>
+          <ul id="archive-ready-list" class="rows"></ul>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2 id="archive-skip-title">Not ready</h2></div>
+          <ul id="archive-skip-list" class="rows"></ul>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>Archived</h2></div>
+        <ul id="archive-log" class="rows"></ul>
       </div>
     </section>
 
