@@ -16,6 +16,7 @@ A Windows app that keeps Downloads and Documents tidy. It watches those folders 
 - **Tray:** shows how many files were tidied today.
 - **First-run setup:** new installs get a three-step welcome (folders, destinations, dry run or live) that ends with a Check. Run it again from Settings.
 - **Updates:** the installed app checks GitHub Releases every few hours, downloads new versions in the background and installs them when it next restarts. Turn this off in Settings, or use **Check for updates** there or in the tray menu. The portable exe doesn't update itself.
+- **Archive (cold storage):** pick the folders your projects live in (each subfolder is one project) and an archive folder on an external drive, NAS or synced cloud folder. Once a day (10am by default) Folder Tidy looks for projects with nothing changed inside for 30 days (changeable) and sends a notification. Nothing moves until you approve it on the Archive page. Each project is zipped into the archive folder, read back and checked file by file against the original, then the original goes to the Recycle Bin. **Restore** unzips it back where it was. Also in the tray menu.
 - **Notifications:** by default you get one daily summary (6pm, changeable) with what moved and how many files need a look, instead of a pop-up per file. If the PC is off at that time, it arrives when Folder Tidy next starts. You can switch to a pop-up for each move, or turn them off.
 
 ## Safety
@@ -25,6 +26,7 @@ A Windows app that keeps Downloads and Documents tidy. It watches those folders 
 - Nothing is deleted. Files are moved, and a name clash gets a number (`invoice (2).pdf`).
 - Partial downloads (`.crdownload`, `.part`, `.tmp`) are left alone until finished.
 - Existing files are not moved when the app starts. Only new files are.
+- Archiving never deletes a project outright. The zip is checked against every original file first, and the project is skipped if anything in it changed while zipping, the drive is missing or short of space, or it has links to other folders. Only then does the original go to the Recycle Bin. A restore never overwrites a folder that's already there.
 
 ## Develop
 
@@ -54,6 +56,7 @@ GitHub Actions builds the installer and portable exe on Windows and publishes th
 - `lib/organiser.js`: plan, move and undo a file
 - `lib/watcher.js`: watches the folders
 - `lib/scan.js`: Check now, reasons and rule suggestions
+- `lib/archive.js`: cold storage: find idle projects, zip, verify, bin and restore
 - `lib/mover.js`, `lib/history.js`, `lib/config.js`, `lib/safety.js`
 - `src/`: the UI
 

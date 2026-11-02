@@ -21,6 +21,7 @@ const ICONS = {
   plus: '<path d="M12 5v14M5 12h14"/>',
   x: '<path d="M6 6l12 12M18 6L6 18"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>',
+  archive: '<path d="M3 4h18v4H3z"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8"/><path d="M10 12h4"/>',
 };
 
 function icon(name) {
@@ -281,6 +282,7 @@ function renderAll() {
   renderHistory();
   renderSettings();
   renderCheck();
+  renderArchive();
 }
 
 async function refresh() {
@@ -774,6 +776,244 @@ $('suggest-list').addEventListener('click', async (e) => {
   await runCheck();
 });
 
+// ---------- Archive ----------
+
+let archiveScan = null;     // the last archive check, from the main process
+let archiveResults = null;  // what happened to each folder after pressing Archive, by path
+let archiveProgress = null;
+
+const ARCHIVE_REASONS = {
+  recent: 'In use',
+  empty: 'Empty',
+  links: 'Has links',
+  unreadable: 'Unreadable',
+  protected: 'Protected',
+  ignored: 'Ignored',
+  'archive-folder': 'Archive folder',
+};
+
+function renderArchiveSetup() {
+  const a = state.archive;
+  $('archive-parents').innerHTML = a.parents.length
+    ? a.parents.map((p, i) => `
+        <li class="folder-row">
+          <span class="file-badge">${icon('folder')}</span>
+          <div class="row-main">
+            <div class="row-title">${esc(baseName(p))}</div>
+            <div class="row-sub">${esc(p)}</div>
+          </div>
+          <button class="btn btn-ghost btn-danger remove-parent" data-index="${i}" title="Stop using this folder">${icon('x')}</button>
+        </li>`).join('')
+    : '<li class="empty">No project folders yet. Add the folder your projects live in.</li>';
+  $('archive-dest').textContent = a.destination || 'No folder chosen yet. Pick a folder on an external drive, a NAS, or a synced cloud folder.';
+  $('choose-archive-dest').textContent = a.destination ? 'Change' : 'Choose folder';
+  $('a-days').value = a.idleDays;
+  $('a-daily').checked = a.dailyCheck;
+  $('a-time').value = a.checkTime;
+  $('a-time-row').classList.toggle('hidden', !a.dailyCheck);
+  const ready = a.parents.length && a.destination;
+  $('run-archive').disabled = !ready || a.busy;
+  $('run-archive').title = ready ? '' : 'Add a project folder and an archive folder first';
+}
+
+function renderArchiveLog() {
+  const log = state.archive.log;
+  $('archive-log').innerHTML = log.length
+    ? log.map((e) => {
+        const when = new Date(e.time).toLocaleDateString([], { dateStyle: 'medium' });
+        const restored = e.restoredTo ? ` · Restored to ${esc(e.restoredTo)}` : '';
+        const kept = e.originalRemoved ? '' : ' · Original still in place';
+        return `
+          <li class="row-item">
+            <span class="file-badge">${icon('archive')}</span>
+            <div class="row-main">
+              <div class="row-title" title="${esc(e.folder)}">${esc(baseName(e.folder))}</div>
+              <div class="row-sub" title="${esc(e.zip)}">${esc(when)} · ${formatSize(e.size)} · ${plural(e.files, 'file')}${restored}${kept}</div>
+            </div>
+            <div class="row-actions">
+              <button class="btn btn-ghost small" data-show-zip="${esc(e.zip)}">Show zip</button>
+              <button class="btn btn-outline" data-restore="${esc(e.id)}">${icon('undo')}Restore</button>
+            </div>
+          </li>`;
+      }).join('')
+    : '<li class="empty">Nothing archived yet.</li>';
+}
+
+function renderArchiveProgress() {
+  const p = archiveProgress;
+  $('archive-progress').hidden = !p;
+  if (!p) return;
+  const stage = { zipping: 'Zipping', checking: 'Checking', binning: 'Sending to the Recycle Bin' }[p.stage];
+  $('archive-progress-label').textContent = `${stage} ${baseName(p.folder)}…`;
+  $('archive-progress-bar').value = p.total ? p.done / p.total : 0;
+}
+
+function renderArchive() {
+  renderArchiveSetup();
+  renderArchiveLog();
+  $('archive-empty').hidden = !!archiveScan;
+  $('archive-results').hidden = !archiveScan;
+  renderArchiveProgress();
+  if (!archiveScan) return;
+
+  const ready = archiveScan.projects.filter((p) => p.ready);
+  const skipped = archiveScan.projects.filter((p) => !p.ready);
+  const when = new Date(archiveScan.time).toLocaleTimeString([], { timeStyle: 'short' });
+  $('archive-meta').textContent = `Checked at ${when}. ${plural(ready.length, 'project')} ready, ${skipped.length} not ready.`
+    + (archiveScan.dryRun ? ' Dry run is on, so nothing will actually be archived.' : '');
+
+  const warnings = [];
+  if (archiveScan.destinationMissing) warnings.push(`Your archive folder (${state.archive.destination}) isn't there. Plug in the drive, then check again.`);
+  for (const m of archiveScan.missingParents) warnings.push(`Project folder not found: ${m}`);
+  $('archive-warning').hidden = !warnings.length;
+  $('archive-warning').innerHTML = warnings.map(esc).join('<br>');
+
+  const total = ready.reduce((sum, p) => sum + p.size, 0);
+  $('archive-ready-title').textContent = `Ready to archive (${ready.length}${ready.length ? `, ${formatSize(total)}` : ''})`;
+  $('archive-ready-list').innerHTML = ready.length
+    ? ready.map((p) => {
+        const done = archiveResults?.[p.folder];
+        const status = !done ? ''
+          : done.ok ? `<span class="result-ok">${done.dryRun ? 'Would archive' : done.originalRemoved === false ? 'Zipped, original kept' : 'Archived'}</span>`
+          : `<span class="result-fail">${esc(done.message)}</span>`;
+        const sub = done && done.ok && done.message ? done.message : p.message;
+        return `
+          <li class="row-item">
+            <label class="check-row">
+              <input type="checkbox" class="archive-pick" value="${esc(p.folder)}" ${done || state.archive.busy ? 'disabled' : 'checked'}>
+              <span class="file-badge">${icon('folder')}</span>
+              <div class="row-main">
+                <div class="row-title" title="${esc(p.folder)}">${esc(p.name)}</div>
+                <div class="row-sub">${esc(sub)}</div>
+              </div>
+            </label>
+            ${done ? status : `<button class="btn btn-ghost small" data-archive-ignore="${esc(p.folder)}" title="Never offer this folder for the archive">Leave alone</button>`}
+          </li>`;
+      }).join('')
+    : `<li class="empty">Nothing has been idle for ${plural(state.archive.idleDays, 'day')} yet.</li>`;
+  updateArchiveButton();
+
+  $('archive-skip-title').textContent = `Not ready (${skipped.length})`;
+  $('archive-skip-list').innerHTML = skipped.length
+    ? skipped.map((p) => `
+        <li class="row-item">
+          <span class="file-badge">${icon('folder')}</span>
+          <div class="row-main">
+            <div class="row-title" title="${esc(p.folder)}">${esc(p.name)}</div>
+            <div class="row-sub">${esc(p.message)}</div>
+          </div>
+          ${p.reason === 'ignored'
+            ? `<button class="btn btn-ghost small" data-archive-unignore="${esc(p.folder)}">Stop ignoring</button>`
+            : `<span class="reason">${esc(ARCHIVE_REASONS[p.reason] || p.reason)}</span>`}
+        </li>`).join('')
+    : '<li class="empty">Every project is ready.</li>';
+}
+
+function pickedProjects() {
+  return [...document.querySelectorAll('.archive-pick:checked:not(:disabled)')].map((cb) => cb.value);
+}
+
+function updateArchiveButton() {
+  const n = pickedProjects().length;
+  const btn = $('archive-checked');
+  btn.disabled = n === 0 || state.archive.busy || archiveScan?.destinationMissing;
+  btn.textContent = state.archive.busy ? 'Archiving…'
+    : archiveScan?.dryRun ? `Try ${plural(n, 'folder')} (dry run)` : `Archive ${plural(n, 'folder')}`;
+}
+
+async function saveArchive(patch) {
+  state = await window.folderTidy.saveArchive(patch);
+  renderArchiveSetup();
+}
+
+async function runArchiveScan() {
+  showPage('archive');
+  if (!state.archive.parents.length || !state.archive.destination) return;
+  $('run-archive').disabled = true;
+  $('run-archive').textContent = 'Checking…';
+  try {
+    archiveScan = await window.folderTidy.archiveScan();
+    archiveResults = null;
+    renderArchive();
+  } finally {
+    $('run-archive').textContent = 'Check again';
+    renderArchiveSetup();
+  }
+}
+
+$('run-archive').addEventListener('click', runArchiveScan);
+
+$('add-parent').addEventListener('click', async () => {
+  const folder = await window.folderTidy.pickFolder('Choose the folder your projects live in');
+  if (!folder || state.archive.parents.some((p) => p.toLowerCase() === folder.toLowerCase())) return;
+  await saveArchive({ parents: [...state.archive.parents, folder] });
+});
+
+$('archive-parents').addEventListener('click', async (e) => {
+  const btn = e.target.closest('.remove-parent');
+  if (!btn) return;
+  await saveArchive({ parents: state.archive.parents.filter((_, i) => i !== Number(btn.dataset.index)) });
+});
+
+$('choose-archive-dest').addEventListener('click', async () => {
+  const folder = await window.folderTidy.pickFolder('Choose where archived projects go');
+  if (folder) await saveArchive({ destination: folder });
+});
+
+$('a-days').addEventListener('change', () => saveArchive({ idleDays: Number($('a-days').value) }));
+$('a-daily').addEventListener('change', () => saveArchive({ dailyCheck: $('a-daily').checked }));
+$('a-time').addEventListener('change', () => saveArchive({ checkTime: $('a-time').value || '10:00' }));
+
+$('archive-ready-list').addEventListener('change', updateArchiveButton);
+
+$('archive-checked').addEventListener('click', async () => {
+  const folders = pickedProjects();
+  if (!folders.length) return;
+  const size = formatSize(archiveScan.projects.filter((p) => folders.includes(p.folder)).reduce((sum, p) => sum + p.size, 0));
+  if (!archiveScan.dryRun && !confirm(`Archive ${plural(folders.length, 'folder')} (${size}) to ${state.archive.destination}?\n\nEach one is zipped and checked first. Only then does the original go to the Recycle Bin.`)) return;
+  state.archive.busy = true;
+  updateArchiveButton();
+  try {
+    const results = await window.folderTidy.archiveRun(folders);
+    archiveResults = { ...(archiveResults || {}), ...Object.fromEntries(results.map((r) => [r.folder, r])) };
+  } finally {
+    archiveProgress = null;
+    state = await window.folderTidy.getState();
+    renderArchive();
+  }
+});
+
+$('archive').addEventListener('click', async (e) => {
+  const ignore = e.target.closest('[data-archive-ignore], [data-archive-unignore]');
+  if (ignore) {
+    ignore.disabled = true;
+    const on = ignore.hasAttribute('data-archive-ignore');
+    archiveScan = await window.folderTidy.archiveIgnore(on ? ignore.dataset.archiveIgnore : ignore.dataset.archiveUnignore, on);
+    renderArchive();
+    return;
+  }
+  const show = e.target.closest('[data-show-zip]');
+  if (show) { window.folderTidy.showItem(show.dataset.showZip); return; }
+  const restore = e.target.closest('[data-restore]');
+  if (restore) {
+    restore.disabled = true;
+    restore.textContent = 'Restoring…';
+    const result = await window.folderTidy.archiveRestore(restore.dataset.restore);
+    if (!result.ok) alert(result.message);
+    state = await window.folderTidy.getState();
+    renderArchiveLog();
+  }
+});
+
+window.folderTidy.onArchiveProgress((p) => {
+  archiveProgress = p;
+  renderArchiveProgress();
+});
+window.folderTidy.onRunArchiveScan(async () => {
+  state = await window.folderTidy.getState();
+  await runArchiveScan();
+});
+
 window.folderTidy.onRunCheck(runCheck);
 window.folderTidy.onShowPage(showPage);
 
@@ -784,5 +1024,7 @@ window.folderTidy.onStateChanged(async () => {
   renderHome();
   renderHistory();
   renderUpdate();
+  renderArchiveSetup();
+  renderArchiveLog();
 });
 refresh();
