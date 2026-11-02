@@ -44,7 +44,7 @@
         "provider": "github",
         "owner": "tlowndes",
         "repo": "folder-tidy",
-        "releaseType": "release"
+        "releaseType": "draft"
       }
     ]
   }
