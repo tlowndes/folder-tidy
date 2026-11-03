@@ -36,7 +36,8 @@ test('scanJunk + cleanJunk: clears old files only, keeps the folders, and dry ru
   write(path.join(temp, 'old.tmp'), 100, 3);
   write(path.join(temp, 'setup', 'old.cab'), 200, 3);
   write(path.join(temp, 'fresh.tmp'), 50, 0);
-  const cats = junkCategories({ localAppData: local, temp }).filter((c) => c.id === 'temp');
+  // windir is blanked so the runner's real C:\Windows\Temp isn't counted on Windows.
+  const cats = junkCategories({ localAppData: local, temp, windir: '' }).filter((c) => c.id === 'temp');
 
   const [scan] = await scanJunk(cats);
   assert.equal(scan.count, 2);
