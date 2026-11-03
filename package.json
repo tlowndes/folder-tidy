@@ -1,7 +1,7 @@
 {
   "name": "folder-tidy",
   "productName": "Folder Tidy",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Watches Downloads and Documents and moves files to the right place, with undo",
   "main": "main.js",
   "author": "Tom Lowndes",

@@ -4,7 +4,11 @@ A Windows app that keeps Downloads and Documents tidy. It watches those folders 
 
 ## How it works
 
-- **Rules** are checked top to bottom. The first enabled rule that matches a file's extension (and optional name text) wins. A rule with no destination does nothing.
+- **Rules** are checked top to bottom. The first enabled rule that matches a file wins. A rule matches on file type (or **Any type**), and can also need the name to contain some text, the file to be bigger than so many MB, or older than so many days (the age check only matters in Check, as new downloads are always new). A rule with no destination does nothing. "Any type" rules never take shortcuts (`.lnk`, `.url`) or `.ini` files.
+- **Rename on move:** a rule can tidy the name (`Brief - Copy (2).PDF` becomes `Brief.pdf`) and put the date in front (`2026-11-03 Brief.pdf`). Undo puts the old name back.
+- **Watched folders:** Downloads and Documents by default. Add any other folder in Settings, or the Desktop with one click.
+- **This week:** files sorted each day, by rule and by folder, space cleared, and a rough guess at the time saved.
+- **Clean:** two halves, both previewed first. **Junk** sizes up temp files, browser caches (Chrome, Edge, Brave, Firefox), crash reports and the thumbnail cache, and clears the ones you tick. These are deleted for good, as they rebuild themselves; anything changed in the last day is kept. It also shows the Recycle Bin and can empty it (after asking). **Big files** lists the largest files in your user folder (or a folder you choose) and how much space each top-level folder takes. Tick any and they go to the Recycle Bin.
 - **Waiting:** a file is moved only after it has finished downloading and a short delay (5 minutes by default).
 - **Undo:** each move is logged for 30 days. Undo puts the file back where it was.
 - **Dry run:** shows what would move without moving anything.
@@ -23,7 +27,9 @@ A Windows app that keeps Downloads and Documents tidy. It watches those folders 
 
 - Folders starting with `@` or `.` are never touched.
 - AppData, OneDrive, Proton Drive, Windows and Program Files are never touched.
-- Nothing is deleted. Files are moved, and a name clash gets a number (`invoice (2).pdf`).
+- Sorting never deletes anything. Files are moved, and a name clash gets a number (`invoice (2).pdf`).
+- `desktop.ini`, `Thumbs.db` and Office `~$` lock files are never moved.
+- The only things deleted for good are the junk files on the Clean page, and only inside the known temp and cache folders, never following links, and never anything changed in the last day. Emptying the Recycle Bin asks first.
 - Partial downloads (`.crdownload`, `.part`, `.tmp`) are left alone until finished.
 - Existing files are not moved when the app starts. Only new files are.
 - Archiving never deletes a project outright. The zip is checked against every original file first, and the project is skipped if anything in it changed while zipping, the drive is missing or short of space, or it has links to other folders. Only then does the original go to the Recycle Bin. A restore never overwrites a folder that's already there.
@@ -57,6 +63,9 @@ GitHub Actions builds the installer and portable exe on Windows and publishes th
 - `lib/watcher.js`: watches the folders
 - `lib/scan.js`: Check now, reasons and rule suggestions
 - `lib/archive.js`: cold storage: find idle projects, zip, verify, bin and restore
+- `lib/naming.js`: tidy names and date prefixes
+- `lib/stats.js`: the This week numbers
+- `lib/cleaner.js`, `lib/recyclebin.js`: the Clean page
 - `lib/mover.js`, `lib/history.js`, `lib/config.js`, `lib/safety.js`
 - `src/`: the UI
 

@@ -21,10 +21,12 @@
 
     <nav class="nav">
       <button data-page="home" class="nav-btn active"><span data-icon="home"></span>Home</button>
+      <button data-page="week" class="nav-btn"><span data-icon="chart"></span>This week</button>
       <button data-page="check" class="nav-btn"><span data-icon="search"></span>Check</button>
       <button data-page="rules" class="nav-btn"><span data-icon="rules"></span>Rules</button>
       <button data-page="history" class="nav-btn"><span data-icon="history"></span>History</button>
       <button data-page="archive" class="nav-btn"><span data-icon="archive"></span>Archive</button>
+      <button data-page="clean" class="nav-btn"><span data-icon="broom"></span>Clean</button>
       <button data-page="settings" class="nav-btn"><span data-icon="settings"></span>Settings</button>
     </nav>
 
@@ -40,7 +42,7 @@
       <header class="page-head">
         <div>
           <h1>Home</h1>
-          <p class="sub">Your downloads and documents are sorted automatically.</p>
+          <p class="sub">New files in your watched folders are sorted automatically.</p>
         </div>
       </header>
 
@@ -68,6 +70,39 @@
           <button class="link-btn" data-goto="history">View all</button>
         </div>
         <ul id="recent-list" class="rows"></ul>
+      </div>
+    </section>
+
+    <!-- THIS WEEK -->
+    <section id="week" class="page">
+      <header class="page-head">
+        <div>
+          <h1>This week</h1>
+          <p class="sub" id="week-range"></p>
+        </div>
+      </header>
+
+      <div class="stats">
+        <div class="card stat"><div class="stat-num" id="week-moved">0</div><div class="stat-label">Files sorted</div><div class="stat-note" id="week-moved-note"></div></div>
+        <div class="card stat"><div class="stat-num" id="week-freed">0</div><div class="stat-label">Space cleared</div><div class="stat-note" id="week-freed-note"></div></div>
+        <div class="card stat"><div class="stat-num" id="week-saved">0</div><div class="stat-label">Time saved</div><div class="stat-note">About 10 seconds a file, at a guess</div></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>Sorted each day</h2><span class="hint" id="week-bytes"></span></div>
+        <div id="week-chart" class="chart"></div>
+        <table class="sr-only" id="week-table"></table>
+      </div>
+
+      <div class="two-col">
+        <div class="card">
+          <div class="card-head"><h2>By rule</h2></div>
+          <ul id="week-rules" class="rows"></ul>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>From</h2></div>
+          <ul id="week-sources" class="rows"></ul>
+        </div>
       </div>
     </section>
 
@@ -235,6 +270,57 @@
       </div>
     </section>
 
+    <!-- CLEAN -->
+    <section id="clean" class="page">
+      <header class="page-head">
+        <div>
+          <h1>Clean</h1>
+          <p class="sub">Clears the junk Windows and your apps leave behind, and finds the big files taking up space. You see everything first.</p>
+        </div>
+      </header>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h2 id="junk-title">Junk</h2>
+            <p class="card-sub">Temp files and caches that rebuild themselves, so they're deleted for good. Anything changed in the last day is kept, as it may be in use.</p>
+          </div>
+          <button id="scan-junk" class="btn btn-primary">Look for junk</button>
+        </div>
+        <ul id="junk-list" class="rows"><li class="empty">Press Look for junk to see how much space you can get back.</li></ul>
+        <div class="card-foot btn-row" id="junk-foot" hidden>
+          <button id="clear-junk" class="btn btn-primary">Clear</button>
+          <span id="junk-result" class="hint"></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h2 id="big-title">Big files</h2>
+            <p class="card-sub">The largest files in your folders. Pick any you don't need and they go to the Recycle Bin.</p>
+          </div>
+          <button id="scan-big" class="btn btn-primary">Find big files</button>
+        </div>
+        <div class="setting">
+          <span><strong>Look in</strong><small id="big-where"></small></span>
+          <span class="btn-row"><button id="big-reset" class="btn btn-ghost small" hidden>Use my user folder</button><button id="big-choose" class="btn btn-light">Choose folder</button></span>
+        </div>
+        <label class="setting">
+          <span><strong>Bigger than</strong><small>Files at least this size are listed.</small></span>
+          <span class="days-field"><input id="big-mb" type="number" min="1" max="100000" class="input num-input"> MB</span>
+        </label>
+        <p id="clean-progress" class="hint" hidden></p>
+        <div id="big-results" hidden>
+          <h3 class="mini-head">Where the space is</h3>
+          <ul id="big-folders" class="rows"></ul>
+          <h3 class="mini-head" id="big-files-head">Biggest files</h3>
+          <ul id="big-list" class="rows"></ul>
+          <div class="card-foot"><button id="bin-big" class="btn btn-outline">Send to Recycle Bin</button></div>
+        </div>
+      </div>
+    </section>
+
     <!-- SETTINGS -->
     <section id="settings" class="page">
       <header class="page-head">
@@ -294,8 +380,9 @@
       <div class="card">
         <div class="card-head"><h2>Watched folders</h2></div>
         <ul id="sources-list" class="rows"></ul>
-        <div class="card-foot">
+        <div class="card-foot btn-row">
           <button id="add-source" class="btn btn-outline">+ Add folder</button>
+          <span id="source-suggest" class="btn-row"></span>
         </div>
       </div>
 
