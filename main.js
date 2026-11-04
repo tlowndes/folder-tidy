@@ -13,6 +13,10 @@ const { scanFolders, suggestRules, explainFile } = require('./lib/scan');
 const { Updater } = require('./lib/updater');
 const { NEEDS_LOOK, isDue, buildDigest } = require('./lib/digest');
 const { findClutter } = require('./lib/clutter');
+const { isProtectedPath } = require('./lib/safety');
+const { buildStats, trimFreed } = require('./lib/stats');
+const { junkCategories, scanJunk, cleanJunk, findBigFiles, MB } = require('./lib/cleaner');
+const { recycleBinInfo, emptyRecycleBin } = require('./lib/recyclebin');
 const { findIdleProjects, archiveFolder, restoreArchive, formatSize } = require('./lib/archive');
 
 const DATA_DIR = path.join(app.getPath('appData'), 'folder-tidy');
@@ -104,8 +108,18 @@ function startWatching() {
   watcher.start(config.data.sources);
 }
 
+// Common folders worth offering with one click, if they aren't watched yet. Desktop moved
+// into OneDrive counts as protected, so it isn't offered then.
+function suggestedSources() {
+  const watched = config.data.sources.map((s) => path.resolve(s.path).toLowerCase());
+  return ['desktop'].map((name) => {
+    try { return app.getPath(name); } catch { return null; }
+  }).filter((p) => p && fs.existsSync(p) && !isProtectedPath(p) && !watched.includes(path.resolve(p).toLowerCase()));
+}
+
 function state() {
   return {
+    suggestedSources: suggestedSources(),
     sources: config.data.sources,
     rules: config.data.rules,
     settings: config.data.settings,
@@ -113,6 +127,11 @@ function state() {
     recent: history.entries.slice(0, 50),
     update: { status: updater.status, version: updater.version, current: app.getVersion() },
     archive: { ...config.data.archive, busy: archiveBusy },
+    cleaner: { ...config.data.cleaner, searching: bigFolders() },
+    stats: buildStats({
+      moves: history.entries, freed: config.data.freed, archived: config.data.archive.log,
+      rules: config.data.rules, sources: config.data.sources,
+    }),
   };
 }
 
@@ -124,9 +143,16 @@ function undoById(id) {
   return result;
 }
 
-// Files the last check offered to bin. Only these can be binned, so the UI can never
-// send anything else to the Recycle Bin.
-let lastClutter = new Set();
+// Files the last check offered to bin, with their sizes. Only these can be binned, so the
+// UI can never send anything else to the Recycle Bin.
+let lastClutter = new Map();
+
+// Notes space given back, for the This week page.
+function logFreed(bytes, kind) {
+  if (!bytes) return;
+  config.data.freed = trimFreed([{ time: new Date().toISOString(), bytes, kind }, ...config.data.freed]);
+  config.save();
+}
 
 // Where clutter is looked for: the watched folders, plus the Installers rule's folder.
 function clutterFolders() {
@@ -147,7 +173,7 @@ function checkNow() {
   } catch (err) {
     console.error('[folder-tidy] clutter', err);
   }
-  lastClutter = new Set(clutter.map((c) => c.file));
+  lastClutter = new Map(clutter.map((c) => [c.file, c.size]));
   return {
     time: new Date().toISOString(),
     dryRun: config.data.settings.dryRun,
@@ -172,7 +198,7 @@ function moveChecked(files) {
     try {
       const plan = explainFile(file, config.data.rules, { ignored: config.data.ignored });
       if (plan.action !== 'move') return { file, ok: false, message: plan.message };
-      const done = applyPlan({ from: file, destDir: plan.destDir, ruleId: plan.ruleId }, { dryRun, history });
+      const done = applyPlan({ from: file, destDir: plan.destDir, ruleId: plan.ruleId, name: plan.name, size: plan.size }, { dryRun, history });
       return { file, ok: true, to: done.to, dryRun };
     } catch (err) {
       const message = err.code === 'ENOENT' ? 'No longer there'
@@ -191,6 +217,7 @@ function moveChecked(files) {
 async function binFiles(files) {
   const { dryRun } = config.data.settings;
   const results = [];
+  let bytes = 0;
   for (const file of files) {
     if (!lastClutter.has(file)) {
       results.push({ file, ok: false, message: 'Not offered by the last check' });
@@ -202,14 +229,99 @@ async function binFiles(files) {
     }
     try {
       await shell.trashItem(file);
+      bytes += lastClutter.get(file) || 0;
       lastClutter.delete(file);
       results.push({ file, ok: true });
     } catch (err) {
       results.push({ file, ok: false, message: /no such file|ENOENT/i.test(err.message) ? 'No longer there' : 'Open in another app, or read-only' });
     }
   }
+  logFreed(bytes, 'clutter');
   const binned = results.filter((r) => r.ok).length;
   if (binned) notify('Folder Tidy', dryRun ? `Dry run: would bin ${binned} files` : `Sent ${binned} files to the Recycle Bin`);
+  return results;
+}
+
+// ---------- Disk cleaner ----------
+
+let cleanBusy = false;
+// Big files the last scan offered. Only these can be binned from the Clean page.
+let lastBig = new Map();
+
+function cleanProgress(stage, count) {
+  if (win && !win.isDestroyed()) win.webContents.send('clean-progress', { stage, count });
+}
+
+async function busyGuard(fn) {
+  if (cleanBusy) return { busy: true };
+  cleanBusy = true;
+  try { return await fn(); } finally { cleanBusy = false; cleanProgress(null, 0); }
+}
+
+function scanJunkNow() {
+  return busyGuard(async () => {
+    const categories = await scanJunk(junkCategories(), { onProgress: (n) => cleanProgress('junk', n) });
+    return { time: new Date().toISOString(), dryRun: config.data.settings.dryRun, categories, recycleBin: await recycleBinInfo() };
+  });
+}
+
+function cleanJunkNow(ids) {
+  return busyGuard(async () => {
+    const { dryRun } = config.data.settings;
+    const results = await cleanJunk(junkCategories(), ids, { dryRun });
+    const freed = results.reduce((sum, r) => sum + (r.freed || 0), 0);
+    if (!dryRun) logFreed(freed, 'cleaner');
+    if (freed) notify('Folder Tidy', dryRun ? `Dry run: would clear ${formatSize(freed)}` : `Cleared ${formatSize(freed)} of junk`);
+    refreshUi();
+    return results;
+  });
+}
+
+async function emptyBinNow() {
+  if (config.data.settings.dryRun) return { ok: true, dryRun: true };
+  const before = await recycleBinInfo();
+  const result = await emptyRecycleBin();
+  if (result.ok) {
+    logFreed(before.size, 'cleaner');
+    if (before.size) notify('Folder Tidy', `Emptied the Recycle Bin (${formatSize(before.size)})`);
+    refreshUi();
+  }
+  return result;
+}
+
+function bigFolders() {
+  const chosen = config.data.cleaner.bigFolders;
+  return chosen.length ? chosen : [os.homedir()];
+}
+
+function scanBigNow() {
+  return busyGuard(async () => {
+    const minBytes = Math.max(1, Number(config.data.cleaner.bigFileMB) || 500) * MB;
+    const result = await findBigFiles(bigFolders(), { minBytes, onProgress: (n) => cleanProgress('big', n) });
+    lastBig = new Map(result.files.map((f) => [f.file, f.size]));
+    return { ...result, time: new Date().toISOString(), dryRun: config.data.settings.dryRun, searched: bigFolders() };
+  });
+}
+
+async function binBigFiles(files) {
+  const { dryRun } = config.data.settings;
+  const results = [];
+  let bytes = 0;
+  for (const file of files) {
+    if (!lastBig.has(file)) { results.push({ file, ok: false, message: 'Not offered by the last scan' }); continue; }
+    if (dryRun) { results.push({ file, ok: true, dryRun }); continue; }
+    try {
+      await shell.trashItem(file);
+      bytes += lastBig.get(file);
+      lastBig.delete(file);
+      results.push({ file, ok: true });
+    } catch (err) {
+      results.push({ file, ok: false, message: /no such file|ENOENT/i.test(err.message) ? 'No longer there' : 'Open in another app, or read-only' });
+    }
+  }
+  logFreed(bytes, 'cleaner');
+  if (bytes) notify('Folder Tidy', `Sent ${formatSize(bytes)} to the Recycle Bin. Empty it to free the space.`);
+  refreshUi();
   return results;
 }
 
@@ -444,6 +556,18 @@ ipcMain.handle('save-archive', (_e, patch) => {
   const allowed = ['parents', 'destination', 'idleDays', 'dailyCheck', 'checkTime'];
   for (const k of allowed) if (k in patch) config.data.archive[k] = patch[k];
   config.data.archive.idleDays = Math.max(1, Math.round(Number(config.data.archive.idleDays) || 30));
+  config.save();
+  return state();
+});
+ipcMain.handle('clean-scan-junk', () => scanJunkNow());
+ipcMain.handle('clean-junk', (_e, ids) => cleanJunkNow(ids));
+ipcMain.handle('empty-bin', () => emptyBinNow());
+ipcMain.handle('clean-scan-big', () => scanBigNow());
+ipcMain.handle('clean-bin-big', (_e, files) => binBigFiles(files));
+ipcMain.handle('save-cleaner', (_e, patch) => {
+  const c = config.data.cleaner;
+  if ('bigFolders' in patch) c.bigFolders = patch.bigFolders.filter((p) => typeof p === 'string');
+  if ('bigFileMB' in patch) c.bigFileMB = Math.max(1, Math.round(Number(patch.bigFileMB) || 500));
   config.save();
   return state();
 });

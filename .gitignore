@@ -3,3 +3,5 @@ dist/
 tmp-tests/
 *.log
 tmp-tests-archive/
+tmp-tests-rules/
+tmp-tests-cleaner/

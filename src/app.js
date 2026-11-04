@@ -21,6 +21,8 @@ const ICONS = {
   plus: '<path d="M12 5v14M5 12h14"/>',
   x: '<path d="M6 6l12 12M18 6L6 18"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>',
+  chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+  broom: '<path d="M14 4l6 6M17 7l-6 6"/><path d="M11 13l-6 1-2 7 7-2 1-6"/><path d="M6 16l2 2"/>',
   archive: '<path d="M3 4h18v4H3z"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8"/><path d="M10 12h4"/>',
 };
 
@@ -81,6 +83,7 @@ function renderHome() {
   $('stat-rules').textContent = state.rules.filter((r) => r.enabled).length;
 
   const recent = state.recent.slice(0, 5);
+  if (state.stats) renderWeek();
   $('recent-list').innerHTML = recent.length
     ? recent.map((e) => `
         <li class="row-item">
@@ -105,6 +108,44 @@ function subExample(r) {
   return `e.g. ${parts.join('\\')}`;
 }
 
+// Mirrors lib/naming.js, so the rule card can show what a name would become.
+function cleanName(fileName) {
+  const dot = fileName.lastIndexOf('.');
+  const ext = dot > 0 ? fileName.slice(dot) : '';
+  const before = ext ? fileName.slice(0, dot) : fileName;
+  const base = before
+    .replace(/^copy of\s+/i, '')
+    .replace(/\s*-\s*copy(\s*\(\d+\))?$/i, '')
+    .replace(/\s*\(\d+\)$/, '')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/^[\s._-]+|[\s_-]+$/g, '');
+  return (base || before) + ext.toLowerCase();
+}
+
+function renameTo(fileName, r) {
+  let name = fileName;
+  if (r.cleanName) name = cleanName(name);
+  if (r.datePrefix && !/^\d{4}-\d{2}-\d{2}/.test(name)) {
+    const d = new Date();
+    name = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${name}`;
+  }
+  return name;
+}
+
+function renameExample(r) {
+  if (!r.cleanName && !r.datePrefix) return '';
+  const sample = r.cleanName ? 'Brief - Copy (2).pdf' : 'Brief.pdf';
+  return `e.g. ${sample} becomes ${renameTo(sample, r)}`;
+}
+
+// The extra conditions on a rule, in words.
+function conditionText(r) {
+  const parts = [];
+  if (r.minSizeMB > 0) parts.push(`over ${r.minSizeMB} MB`);
+  if (r.olderThanDays > 0) parts.push(`older than ${plural(r.olderThanDays, 'day')}`);
+  return parts.join(' and ');
+}
+
 function ruleCard(r, i) {
   const noDest = !r.destination;
   return `
@@ -122,12 +163,21 @@ function ruleCard(r, i) {
       </div>
       <div class="rule-body">
         <div class="field">
-          <span class="field-label">File types</span>
-          <input type="text" class="input rule-ext" value="${esc(r.extensions.join(', '))}" placeholder=".pdf, .docx">
+          <span class="field-label field-label-row">File types
+            <label class="tick"><input type="checkbox" class="rule-any" ${r.anyType ? 'checked' : ''}>Any type</label></span>
+          <input type="text" class="input rule-ext" value="${esc(r.anyType ? '' : r.extensions.join(', '))}" placeholder="${r.anyType ? 'Every file type' : '.pdf, .docx'}" ${r.anyType ? 'disabled' : ''}>
         </div>
         <div class="field">
           <span class="field-label">Name contains <span class="optional">(optional)</span></span>
           <input type="text" class="input rule-pattern" value="${esc(r.namePattern || '')}" placeholder="invoice">
+        </div>
+        <div class="field">
+          <span class="field-label">Bigger than <span class="optional">(optional)</span></span>
+          <span class="unit-field"><input type="number" min="0" step="1" class="input num-input rule-size" value="${r.minSizeMB || ''}" placeholder="Any"> MB</span>
+        </div>
+        <div class="field">
+          <span class="field-label">Older than <span class="optional">(optional, Check only)</span></span>
+          <span class="unit-field"><input type="number" min="0" step="1" class="input num-input rule-age" value="${r.olderThanDays || ''}" placeholder="Any"> days</span>
         </div>
         <div class="field field-full">
           <span class="field-label">Move to</span>
@@ -144,6 +194,14 @@ function ruleCard(r, i) {
                 <label><input type="radio" class="rule-sub" name="sub-${i}" value="${v}" ${(r.subfolders || '') === v ? 'checked' : ''}><span>${label}</span></label>`).join('')}
             </div>
             <span class="sub-example">${esc(subExample(r))}</span>
+          </div>
+        </div>
+        <div class="field field-full">
+          <span class="field-label">Rename <span class="optional">(optional, undo puts the old name back)</span></span>
+          <div class="sub-row">
+            <label class="tick"><input type="checkbox" class="rule-clean" ${r.cleanName ? 'checked' : ''}>Tidy the name</label>
+            <label class="tick"><input type="checkbox" class="rule-date" ${r.datePrefix ? 'checked' : ''}>Add the date to the front</label>
+            <span class="sub-example rename-example">${esc(renameExample(r))}</span>
           </div>
         </div>
       </div>
@@ -164,11 +222,18 @@ function readRulesFromDom() {
     const r = rulesDraft[i];
     r.name = card.querySelector('.rule-name').value.trim() || r.name;
     r.enabled = card.querySelector('.rule-enabled').checked;
-    r.extensions = card.querySelector('.rule-ext').value
-      .split(',').map((e) => e.trim().toLowerCase()).filter(Boolean)
-      .map((e) => (e.startsWith('.') ? e : `.${e}`));
+    r.anyType = card.querySelector('.rule-any').checked;
+    if (!r.anyType) {
+      r.extensions = card.querySelector('.rule-ext').value
+        .split(',').map((e) => e.trim().toLowerCase()).filter(Boolean)
+        .map((e) => (e.startsWith('.') ? e : `.${e}`));
+    }
     r.namePattern = card.querySelector('.rule-pattern').value.trim();
+    r.minSizeMB = Math.max(0, Math.round(Number(card.querySelector('.rule-size').value) || 0));
+    r.olderThanDays = Math.max(0, Math.round(Number(card.querySelector('.rule-age').value) || 0));
     r.subfolders = card.querySelector('.rule-sub:checked')?.value || '';
+    r.cleanName = card.querySelector('.rule-clean').checked;
+    r.datePrefix = card.querySelector('.rule-date').checked;
   });
 }
 
@@ -178,7 +243,8 @@ function runTest() {
   out.className = 'test-result';
   if (!name) { out.textContent = 'Type a file name to see where it would go.'; return; }
   const ext = name.includes('.') ? name.slice(name.lastIndexOf('.')).toLowerCase() : '';
-  const hit = (rulesDraft || state.rules).find((r) => r.enabled && r.extensions.includes(ext) &&
+  // A typed name has no size or age, so rules with those conditions are shown as "if".
+  const hit = (rulesDraft || state.rules).find((r) => r.enabled && (r.anyType || r.extensions.includes(ext)) &&
     (!r.namePattern || name.toLowerCase().includes(r.namePattern.toLowerCase())));
   if (!hit) {
     out.classList.add('miss');
@@ -189,7 +255,10 @@ function runTest() {
   } else {
     out.classList.add('hit');
     const sub = hit.subfolders ? ` ${subExample(hit).replace('e.g. ', '(into ')})` : '';
-    out.textContent = `Would move to ${hit.destination}${sub} (rule: ${hit.name})`;
+    const newName = renameTo(name, hit);
+    const as = newName !== name ? ` as ${newName}` : '';
+    const cond = conditionText(hit);
+    out.textContent = `Would move to ${hit.destination}${sub}${as} (rule: ${hit.name})${cond ? `, if it's ${cond}` : ''}`;
   }
 }
 
@@ -274,15 +343,96 @@ function renderSettings() {
           <button class="btn btn-ghost btn-danger remove-source" data-index="${i}" title="Stop watching">${icon('x')}</button>
         </li>`).join('')
     : '<li class="empty">No folders are watched. Add one below.</li>';
+  $('source-suggest').innerHTML = suggestButtons(sourcesDraft);
+}
+
+// One-click buttons for common folders, such as the Desktop, that aren't in the list yet.
+function suggestButtons(sources) {
+  return (state.suggestedSources || [])
+    .filter((p) => !sources.some((s) => s.path.toLowerCase() === p.toLowerCase()))
+    .map((p) => `<button class="btn btn-light" data-add-source="${esc(p)}">${icon('plus')}${esc(baseName(p))}</button>`).join('');
+}
+
+// ---------- This week ----------
+
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+// A thin bar per day, rounded at the top only, with a hover title and the peak labelled.
+function dayChart(days) {
+  const w = 700, h = 180, top = 22, bottom = 26, gap = 18;
+  const plot = h - top - bottom;
+  const max = Math.max(1, ...days.map((d) => d.count));
+  const bw = (w - gap * (days.length - 1)) / days.length;
+  const peak = days.reduce((best, d, i) => (d.count > days[best].count ? i : best), 0);
+  const today = days.length - 1;
+  const bars = days.map((d, i) => {
+    const x = i * (bw + gap);
+    const bh = d.count ? Math.max(4, (d.count / max) * plot) : 0;
+    const y = top + plot - bh;
+    const r = Math.min(4, bh / 2);
+    const day = DAY_NAMES[new Date(d.date).getDay()];
+    const label = i === today ? 'Today' : day;
+    const tip = `${label}: ${plural(d.count, 'file')}${d.bytes ? `, ${formatSize(d.bytes)}` : ''}`;
+    // Path with rounded top corners and a square base sitting on the baseline.
+    const bar = bh ? `<path class="bar${i === today ? ' today' : ''}" d="M${x},${top + plot} V${y + r} Q${x},${y} ${x + r},${y} H${x + bw - r} Q${x + bw},${y} ${x + bw},${y + r} V${top + plot} Z"/>` : '';
+    const value = d.count && i === peak ? `<text class="bar-value" x="${x + bw / 2}" y="${y - 6}">${d.count}</text>` : '';
+    return `<g><title>${esc(tip)}</title><rect class="hit" x="${x - gap / 2}" y="0" width="${bw + gap}" height="${h}"/>${bar}${value}
+      <text class="axis-label${i === today ? ' strong' : ''}" x="${x + bw / 2}" y="${h - 6}">${label}</text></g>`;
+  }).join('');
+  return `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Files sorted on each of the last 7 days">
+    <line class="baseline" x1="0" x2="${w}" y1="${top + plot + 0.5}" y2="${top + plot + 0.5}"/>${bars}</svg>`;
+}
+
+// A row with a thin horizontal bar showing its share of the biggest row.
+function shareRow(title, count, max, sub = '', display = count) {
+  const pct = max ? Math.max(2, (count / max) * 100) : 0;
+  return `
+    <li class="share-row">
+      <div class="share-top"><span class="row-title" title="${esc(title)}">${esc(title)}</span><span class="share-num">${esc(display)}</span></div>
+      <svg class="share-bar" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true">
+        <rect class="track" x="0" y="0" width="100" height="6" rx="3"/><rect class="fill" x="0" y="0" width="${pct}" height="6" rx="3"/></svg>
+      ${sub ? `<div class="row-sub">${esc(sub)}</div>` : ''}
+    </li>`;
+}
+
+function renderWeek() {
+  const st = state.stats;
+  const fmt = (iso) => new Date(iso).toLocaleDateString([], { day: 'numeric', month: 'short' });
+  $('week-range').textContent = `${fmt(st.since)} to today. What Folder Tidy did for you in the last 7 days.`;
+  $('week-moved').textContent = st.moved;
+  const diff = st.moved - st.previousWeek;
+  $('week-moved-note').textContent = st.previousWeek || st.moved
+    ? (diff === 0 ? 'Same as the week before' : `${Math.abs(diff)} ${diff > 0 ? 'more' : 'fewer'} than the week before`)
+    : 'Nothing yet';
+  $('week-freed').textContent = st.freed ? formatSize(st.freed) : '0';
+  const parts = [['clutter', 'clutter binned'], ['cleaner', 'cleaned'], ['archive', 'archived']]
+    .filter(([k]) => st.freedBy[k]).map(([k, label]) => `${formatSize(st.freedBy[k])} ${label}`);
+  $('week-freed-note').textContent = parts.length ? parts.join(', ') : 'From the Check, Clean and Archive pages';
+  $('week-saved').textContent = st.minutesSaved >= 60 ? `${(st.minutesSaved / 60).toFixed(1)} hr` : `${st.minutesSaved} min`;
+  $('week-bytes').textContent = st.moved ? `${formatSize(st.bytesMoved)} in all${st.renamed ? `, ${plural(st.renamed, 'file')} renamed` : ''}` : '';
+
+  $('week-chart').innerHTML = st.moved ? dayChart(st.days) : '<div class="empty">Nothing sorted in the last 7 days yet. New downloads will show up here.</div>';
+  $('week-table').innerHTML = `<caption>Files sorted each day</caption><tr><th>Day</th><th>Files</th></tr>${st.days.map((d) => `<tr><td>${esc(new Date(d.date).toDateString())}</td><td>${d.count}</td></tr>`).join('')}`;
+
+  const maxRule = st.byRule[0]?.count || 0;
+  $('week-rules').innerHTML = st.byRule.length
+    ? st.byRule.map((r) => shareRow(r.name, r.count, maxRule, r.bytes ? formatSize(r.bytes) : '')).join('')
+    : '<li class="empty">No rules used yet this week.</li>';
+  const maxSrc = st.bySource[0]?.count || 0;
+  $('week-sources').innerHTML = st.bySource.length
+    ? st.bySource.map((s) => shareRow(baseName(s.folder), s.count, maxSrc, s.folder)).join('')
+    : '<li class="empty">Nothing yet.</li>';
 }
 
 function renderAll() {
   renderHome();
+  renderWeek();
   renderRules();
   renderHistory();
   renderSettings();
   renderCheck();
   renderArchive();
+  renderClean();
 }
 
 async function refresh() {
@@ -340,7 +490,7 @@ function renderSetup() {
   if (step === 0) {
     $('setup-body').innerHTML = `<ul class="rows">${setup.sources.map((s, i) => setupRow('folder', baseName(s.path), s.path,
       `<input type="checkbox" class="switch setup-src" data-i="${i}" ${s.enabled ? 'checked' : ''} aria-label="Watch ${esc(baseName(s.path))}">`)).join('')}</ul>
-      <button id="setup-add-src" class="btn btn-outline">${icon('plus')}Add folder</button>`;
+      <div class="btn-row"><button id="setup-add-src" class="btn btn-outline">${icon('plus')}Add folder</button>${suggestButtons(setup.sources)}</div>`;
   } else if (step === 1) {
     $('setup-body').innerHTML = `<ul class="rows">${setup.rules.map((r, i) => `
       <li class="row-item setup-rule">
@@ -376,6 +526,11 @@ $('setup-body').addEventListener('click', async (e) => {
     if (folder && !setup.sources.some((s) => s.path.toLowerCase() === folder.toLowerCase())) {
       setup.sources.push({ path: folder, enabled: true });
     }
+    renderSetup();
+  }
+  const quick = e.target.closest('[data-add-source]');
+  if (quick) {
+    setup.sources.push({ path: quick.dataset.addSource, enabled: true });
     renderSetup();
   }
   const dest = e.target.closest('.setup-dest');
@@ -446,9 +601,19 @@ $('rules-list').addEventListener('click', async (e) => {
 
 $('rules-list').addEventListener('input', (e) => {
   readRulesFromDom();
+  const card = e.target.closest('.rule');
+  const r = card && rulesDraft[Number(card.dataset.index)];
   if (e.target.classList.contains('rule-sub')) {
-    const card = e.target.closest('.rule');
-    card.querySelector('.sub-example').textContent = subExample(rulesDraft[Number(card.dataset.index)]);
+    card.querySelector('.sub-example').textContent = subExample(r);
+  }
+  if (e.target.classList.contains('rule-clean') || e.target.classList.contains('rule-date')) {
+    card.querySelector('.rename-example').textContent = renameExample(r);
+  }
+  if (e.target.classList.contains('rule-any')) {
+    const ext = card.querySelector('.rule-ext');
+    ext.disabled = r.anyType;
+    ext.value = r.anyType ? '' : r.extensions.join(', ');
+    ext.placeholder = r.anyType ? 'Every file type' : '.pdf, .docx';
   }
   runTest();
 });
@@ -486,7 +651,7 @@ document.addEventListener('drop', (e) => {
     readRulesFromDom();
     const i = Number(target.dataset.index);
     const ext = name.includes('.') ? name.slice(name.lastIndexOf('.')).toLowerCase() : '';
-    if (ext && !rulesDraft[i].extensions.includes(ext)) rulesDraft[i].extensions.push(ext);
+    if (ext && !rulesDraft[i].anyType && !rulesDraft[i].extensions.includes(ext)) rulesDraft[i].extensions.push(ext);
     renderRules();
     document.querySelector(`.rule[data-index="${i}"]`)?.classList.add('just-added');
   }
@@ -528,6 +693,13 @@ $('add-source').addEventListener('click', async () => {
   if (!folder) return;
   if (sourcesDraft.some((s) => s.path.toLowerCase() === folder.toLowerCase())) return;
   sourcesDraft.push({ path: folder, enabled: true });
+  renderSettings();
+});
+
+$('source-suggest').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-add-source]');
+  if (!btn) return;
+  sourcesDraft.push({ path: btn.dataset.addSource, enabled: true });
   renderSettings();
 });
 
@@ -575,6 +747,7 @@ const REASONS = {
   'no-destination': { label: 'No folder set', fixable: true },
   'rule-off': { label: 'Rule off', fixable: true },
   'name-mismatch': { label: 'Name filter', fixable: true },
+  condition: { label: 'Size or age', fixable: true },
   'already-there': { label: 'Already sorted' },
   downloading: { label: 'Downloading' },
   'too-new': { label: 'Just changed' },
@@ -1012,6 +1185,216 @@ window.folderTidy.onArchiveProgress((p) => {
 window.folderTidy.onRunArchiveScan(async () => {
   state = await window.folderTidy.getState();
   await runArchiveScan();
+});
+
+// ---------- Clean ----------
+
+let junk = null;        // the last junk scan
+let junkResults = null; // what clearing did, by category id
+let big = null;         // the last big-files scan
+let bigResults = null;  // what binning did, by file path
+
+function ago(ms) {
+  const days = Math.floor((Date.now() - ms) / (24 * 60 * 60 * 1000));
+  if (days < 1) return 'today';
+  if (days < 60) return `${plural(days, 'day')} ago`;
+  if (days < 730) return `${Math.floor(days / 30)} months ago`;
+  return `${Math.floor(days / 365)} years ago`;
+}
+
+function renderCleanSetup() {
+  const c = state.cleaner;
+  $('big-where').textContent = c.searching.join(', ') + (c.bigFolders.length ? '' : ' (AppData and OneDrive are left out)');
+  $('big-reset').hidden = !c.bigFolders.length;
+  $('big-mb').value = c.bigFileMB;
+}
+
+function renderJunk() {
+  if (!junk) return;
+  const cats = junk.categories;
+  const total = cats.reduce((sum, c) => sum + c.size, 0);
+  $('junk-title').textContent = `Junk (${formatSize(total)})`;
+  const rows = cats.map((c) => {
+    const done = junkResults?.[c.id];
+    const status = !done ? `<span class="share-num">${c.size ? formatSize(c.size) : 'None'}</span>`
+      : `<span class="result-ok">${done.dryRun ? 'Would clear' : 'Cleared'} ${formatSize(done.freed)}${done.skipped ? ` · ${done.skipped} in use` : ''}</span>`;
+    return `
+      <li class="row-item">
+        <label class="check-row">
+          <input type="checkbox" class="junk-pick" value="${esc(c.id)}" ${done || !c.size ? 'disabled' : 'checked'}>
+          <span class="file-badge">${icon('broom')}</span>
+          <div class="row-main">
+            <div class="row-title">${esc(c.name)}</div>
+            <div class="row-sub">${esc(c.description)}${c.count ? ` · ${plural(c.count, 'file')}` : ''}</div>
+          </div>
+        </label>
+        ${status}
+      </li>`;
+  });
+  const bin = junk.recycleBin;
+  if (bin.available) {
+    rows.push(`
+      <li class="row-item">
+        <span class="file-badge">${icon('trash')}</span>
+        <div class="row-main">
+          <div class="row-title">Recycle Bin</div>
+          <div class="row-sub">${bin.count ? `${plural(bin.count, 'item')}. Emptying it is for good.` : 'Already empty'}</div>
+        </div>
+        <span class="share-num">${bin.size ? formatSize(bin.size) : ''}</span>
+        <button id="empty-bin" class="btn btn-outline" ${bin.count ? '' : 'disabled'}>Empty</button>
+      </li>`);
+  }
+  $('junk-list').innerHTML = rows.join('');
+  $('junk-foot').hidden = false;
+  updateJunkButton();
+}
+
+function pickedJunk() {
+  return [...document.querySelectorAll('.junk-pick:checked:not(:disabled)')].map((cb) => cb.value);
+}
+
+function updateJunkButton() {
+  const ids = pickedJunk();
+  const size = junk ? junk.categories.filter((c) => ids.includes(c.id)).reduce((sum, c) => sum + c.size, 0) : 0;
+  $('clear-junk').disabled = !ids.length;
+  $('clear-junk').textContent = ids.length ? `${junk.dryRun ? 'Try clearing' : 'Clear'} ${formatSize(size)}` : 'Clear';
+}
+
+function renderBig() {
+  $('big-results').hidden = !big;
+  if (!big) return;
+  const maxFolder = big.folders[0]?.size || 0;
+  $('big-folders').innerHTML = big.folders.length
+    ? big.folders.map((f) => shareRow(baseName(f.folder), f.size, maxFolder, f.folder, formatSize(f.size))).join('')
+    : '<li class="empty">Nothing found.</li>';
+  $('big-files-head').textContent = `Biggest files (${big.files.length})`;
+  $('big-list').innerHTML = big.files.length
+    ? big.files.map((f) => {
+        const done = bigResults?.[f.file];
+        const status = !done ? '' : done.ok ? `<span class="result-ok">${done.dryRun ? 'Would bin' : 'Binned'}</span>` : `<span class="result-fail">${esc(done.message)}</span>`;
+        return `
+          <li class="row-item">
+            <label class="check-row">
+              <input type="checkbox" class="big-pick" value="${esc(f.file)}" ${done ? 'disabled' : ''}>
+              <span class="file-badge">${icon('file')}</span>
+              <div class="row-main">
+                <div class="row-title" title="${esc(f.file)}">${esc(baseName(f.file))}</div>
+                <div class="row-sub" title="${esc(parentOf(f.file))}">${formatSize(f.size)} · changed ${ago(f.mtimeMs)} · ${esc(parentOf(f.file))}</div>
+              </div>
+            </label>
+            ${done ? status : `<button class="btn btn-ghost small" data-show-file="${esc(f.file)}">Show</button>`}
+          </li>`;
+      }).join('')
+    : `<li class="empty">No files over ${state.cleaner.bigFileMB} MB. Nice.</li>`;
+  updateBigButton();
+}
+
+function pickedBig() {
+  return [...document.querySelectorAll('.big-pick:checked:not(:disabled)')].map((cb) => cb.value);
+}
+
+function updateBigButton() {
+  const files = pickedBig();
+  const size = big ? big.files.filter((f) => files.includes(f.file)).reduce((sum, f) => sum + f.size, 0) : 0;
+  $('bin-big').disabled = !files.length;
+  $('bin-big').textContent = files.length ? `${big.dryRun ? 'Try binning' : 'Bin'} ${plural(files.length, 'file')} (${formatSize(size)})` : 'Send to Recycle Bin';
+}
+
+function renderClean() {
+  renderCleanSetup();
+  renderJunk();
+  renderBig();
+}
+
+async function busyButton(btn, label, fn) {
+  const before = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = label;
+  try { return await fn(); } finally { btn.disabled = false; btn.textContent = before; }
+}
+
+$('scan-junk').addEventListener('click', () => busyButton($('scan-junk'), 'Looking…', async () => {
+  const result = await window.folderTidy.cleanScanJunk();
+  if (result.busy) return;
+  junk = result;
+  junkResults = null;
+  renderJunk();
+  $('scan-junk').dataset.done = '1';
+}).then(() => { if ($('scan-junk').dataset.done) $('scan-junk').textContent = 'Look again'; }));
+
+$('junk-list').addEventListener('change', updateJunkButton);
+
+$('clear-junk').addEventListener('click', async () => {
+  const ids = pickedJunk();
+  if (!ids.length) return;
+  if (!junk.dryRun && !confirm('Delete these temp and cache files for good?\n\nApps rebuild them when they need them. Close your browser first to clear the most.')) return;
+  await busyButton($('clear-junk'), 'Clearing…', async () => {
+    const results = await window.folderTidy.cleanJunk(ids);
+    if (results.busy) return;
+    junkResults = { ...(junkResults || {}), ...Object.fromEntries(results.map((r) => [r.id, r])) };
+    const freed = results.reduce((sum, r) => sum + (r.freed || 0), 0);
+    $('junk-result').textContent = `${junk.dryRun ? 'Dry run: would clear' : 'Cleared'} ${formatSize(freed)}.`;
+  });
+  renderJunk();
+});
+
+$('junk-list').addEventListener('click', async (e) => {
+  if (!e.target.closest('#empty-bin')) return;
+  const bin = junk.recycleBin;
+  if (!confirm(`Empty the Recycle Bin (${formatSize(bin.size)}, ${plural(bin.count, 'item')})?\n\nThis can't be undone.`)) return;
+  const result = await window.folderTidy.emptyBin();
+  if (!result.ok) { alert(result.message); return; }
+  if (result.dryRun) { $('junk-result').textContent = 'Dry run: the Recycle Bin was left as it is.'; return; }
+  junk.recycleBin = { ...bin, count: 0, size: 0 };
+  renderJunk();
+});
+
+$('scan-big').addEventListener('click', () => busyButton($('scan-big'), 'Looking…', async () => {
+  $('clean-progress').hidden = false;
+  $('clean-progress').textContent = 'Looking through your folders…';
+  const result = await window.folderTidy.cleanScanBig();
+  $('clean-progress').hidden = true;
+  if (result.busy) return;
+  big = result;
+  bigResults = null;
+  renderBig();
+}));
+
+$('big-list').addEventListener('change', updateBigButton);
+$('big-list').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-show-file]');
+  if (btn) window.folderTidy.showItem(btn.dataset.showFile);
+});
+
+$('bin-big').addEventListener('click', async () => {
+  const files = pickedBig();
+  if (!files.length) return;
+  await busyButton($('bin-big'), 'Binning…', async () => {
+    const results = await window.folderTidy.cleanBinBig(files);
+    bigResults = { ...(bigResults || {}), ...Object.fromEntries(results.map((r) => [r.file, r])) };
+  });
+  renderBig();
+});
+
+$('big-choose').addEventListener('click', async () => {
+  const folder = await window.folderTidy.pickFolder('Choose a folder to look for big files in');
+  if (!folder) return;
+  state = await window.folderTidy.saveCleaner({ bigFolders: [folder] });
+  renderCleanSetup();
+});
+$('big-reset').addEventListener('click', async () => {
+  state = await window.folderTidy.saveCleaner({ bigFolders: [] });
+  renderCleanSetup();
+});
+$('big-mb').addEventListener('change', async () => {
+  state = await window.folderTidy.saveCleaner({ bigFileMB: Number($('big-mb').value) });
+  renderCleanSetup();
+});
+
+window.folderTidy.onCleanProgress((p) => {
+  if (!p.stage) return;
+  $('clean-progress').hidden = false;
+  $('clean-progress').textContent = `${p.stage === 'big' ? 'Looked at' : 'Counted'} ${p.count.toLocaleString()} files…`;
 });
 
 window.folderTidy.onRunCheck(runCheck);
