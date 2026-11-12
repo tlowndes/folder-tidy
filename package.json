@@ -1,7 +1,7 @@
 {
   "name": "folder-tidy",
   "productName": "Folder Tidy",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Watches Downloads and Documents and moves files to the right place, with undo",
   "main": "main.js",
   "author": "Tom Lowndes",
@@ -46,6 +46,20 @@
         "repo": "folder-tidy",
         "releaseType": "draft"
       }
-    ]
+    ],
+    "asarUnpack": [
+      "assets/icon.ico",
+      "assets/icon.png"
+    ],
+    "nsis": {
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "installerHeaderIcon": "assets/icon.ico",
+      "include": "build/installer.nsh",
+      "shortcutName": "Folder Tidy"
+    },
+    "portable": {
+      "artifactName": "Folder-Tidy-Portable-${version}.${ext}"
+    }
   }
 }

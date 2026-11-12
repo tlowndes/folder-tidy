@@ -39,7 +39,11 @@ let tray = null;
 let rebuildTray = () => {};
 
 // .ico holds every size, so Windows picks a crisp one for the tray at any display scale.
-const ICON_PATH = path.join(__dirname, 'assets', process.platform === 'win32' ? 'icon.ico' : 'icon.png');
+// The icons are unpacked from app.asar (see build.asarUnpack) so Windows can read them
+// straight off disk for the title bar and taskbar.
+const ASSETS_DIR = path.join(__dirname.replace('app.asar', 'app.asar.unpacked'), 'assets');
+const ICON_PATH = path.join(ASSETS_DIR, process.platform === 'win32' ? 'icon.ico' : 'icon.png');
+const appIcon = () => nativeImage.createFromPath(ICON_PATH);
 const TRAY_ICON_PATH = process.platform === 'win32' ? ICON_PATH : path.join(__dirname, 'assets', 'tray.png');
 
 function notify(title, body, onClick) {
@@ -463,7 +467,7 @@ function createWindow() {
     minWidth: 760,
     minHeight: 520,
     title: 'Folder Tidy',
-    icon: ICON_PATH,
+    icon: appIcon(),
     backgroundColor: '#f6f6f6',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -472,6 +476,7 @@ function createWindow() {
     },
   });
   win.setMenuBarVisibility(false);
+  if (process.platform === 'win32') win.setIcon(appIcon());
   win.loadFile(path.join(__dirname, 'src', 'index.html'));
   win.on('close', (e) => {
     // Closing the window hides it; the app keeps running in the tray.
